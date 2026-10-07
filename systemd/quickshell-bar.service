@@ -1,0 +1,19 @@
+[Unit]
+Description=Quickshell bar, OSD, quick settings and notification daemon (~/.config/quickshell/bar)
+PartOf=graphical-session.target
+After=graphical-session.target
+# A broken config makes qs exit at once: give up after 5 failed starts within a
+# minute instead of looping. Once fixed: systemctl --user reset-failed quickshell-bar
+# && systemctl --user start quickshell-bar (a real unit, so reset-failed is safe).
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=exec
+ExecStart=/usr/bin/qs -c bar
+Restart=always
+RestartSec=2
+Slice=app-graphical.slice
+
+# No [Install]: Hyprland starts it (hyde.config.start.bar in ~/.config/hypr/hyprland.lua)
+# once the session environment has been imported into the user manager.
