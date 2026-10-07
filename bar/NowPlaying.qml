@@ -1,0 +1,407 @@
+import QtQuick
+import QtQuick.Layouts
+import QtQuick.Effects
+import QtQuick.Particles
+import Quickshell
+import Quickshell.Io
+import Quickshell.Wayland
+import Quickshell.Hyprland
+import Quickshell.Widgets
+import qs
+import qs.components
+
+// Now Playing panel, shown while the pointer rests on the bar's media pill
+// (modules/Media.qml) or with `qs -c bar ipc call media toggle`. Pours out of the point
+// where the pointer rested, and on leaving vanishes from the point where the pointer
+// went out, a hole spreading from there (Player.origin, components/Dissolve). A record
+// (components/Disc) turns inside a radial spectrum (components/Ring) and throws sparks
+// on the beat; it is all tinted from the cover art
+// (Player palette) over a blurred copy of it. Click the record to play/pause, scroll it
+// to scrub 5s. Closes once the pointer is on neither the pill nor the card.
+Scope {
+    IpcHandler {
+        target: "media"
+        function toggle(): void {
+            const name = Hyprland.focusedMonitor?.name ?? Quickshell.screens[0].name
+            const s = Quickshell.screens.find(s => s.name === name) ?? Quickshell.screens[0]
+            Player.toggle(s.name, s.width / 2)
+        }
+    }
+
+    Variants {
+        model: Quickshell.screens
+
+        PanelWindow {
+            id: win
+            required property var modelData
+            readonly property var player: Player.player
+            readonly property bool open: Player.open && Player.screen === modelData.name && !!player
+
+            screen: modelData
+            visible: card.progress > 0
+            anchors { top: true; left: true }
+            margins.top: Config.height + 4
+            margins.left: Math.max(8, Math.min(modelData.width - width - 8, Player.anchorX - width / 2))
+            implicitWidth: card.width + 48
+            implicitHeight: card.height + 48
+            exclusionMode: ExclusionMode.Ignore
+            color: "transparent"
+            mask: Region { item: card }
+            WlrLayershell.layer: WlrLayer.Overlay
+            WlrLayershell.namespace: "nowplaying"
+
+            onOpenChanged: {
+                // pour out of / drain into Player.origin, frozen for this transition
+                card.spawn = Qt.vector2d((Player.origin.x - win.margins.left - card.x) / card.width,
+                                         (Player.origin.y - win.margins.top - card.y) / card.height)
+                card.closing = !open
+                if (open) {
+                    card.seed = Math.random() * 100
+                    burn.stop()
+                    form.restart()
+                    if (!Player.pillHovered) { closer.interval = 3000; closer.restart() }   // IPC: time to move the pointer onto it
+                    Player.refreshPos()
+                } else {
+                    form.stop()
+                    burn.restart()
+                }
+            }
+            onPlayerChanged: if (!player) Player.open = false
+            NumberAnimation { id: form; target: card; property: "progress"; to: 1; duration: 700; easing.type: Easing.OutQuart }
+            // closing: a hole opens where the pointer left and spreads, fast then settling
+            NumberAnimation { id: burn; target: card; property: "progress"; to: 0; duration: 420; easing.type: Easing.OutCubic }
+
+            Timer { id: closer; onTriggered: if (!hover.hovered && !Player.pillHovered) Player.open = false }
+            Connections {
+                target: Player
+                function onPillHoveredChanged() {
+                    if (Player.pillHovered) closer.stop()
+                    else if (win.open && !hover.hovered) { closer.interval = 300; closer.restart() }   // time to cross the gap
+                }
+            }
+            HoverHandler {
+                id: hover
+                property point last   // pointer position in the window, kept for where it leaves
+                onPointChanged: if (hovered) last = point.position
+                onHoveredChanged: {
+                    if (hovered) closer.stop()
+                    else if (win.open) {
+                        Player.origin = Qt.point(win.margins.left + last.x, win.margins.top + last.y)   // drains into here
+                        closer.interval = 150   // just enough to cross back to the pill
+                        closer.restart()
+                    }
+                }
+            }
+
+            function fmt(s) { return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}` }
+
+            Rectangle {   // shadow, once the blob has filled the card
+                anchors.fill: card
+                radius: card.radius
+                opacity: Math.max(0, (card.progress - 0.8) / 0.2)
+                color: Theme.mainBg
+                layer.enabled: true
+                layer.effect: MultiEffect { shadowEnabled: true; shadowColor: "black"; shadowOpacity: 0.55; shadowBlur: 1; shadowVerticalOffset: 6; blurMax: 40 }
+            }
+
+            ClippingRectangle {
+                id: card
+                property real progress: 0
+                property real seed: 0
+                property real kick: 0   // 0..1, jumps on a beat and eases off
+                property vector2d spawn: Qt.vector2d(0.5, 0)   // Dissolve origin, 0..1 of the card (may sit outside)
+                property bool closing: false
+                readonly property real len: Player.length
+                readonly property real pos: Player.pos
+                readonly property real frac: Player.frac
+
+                visible: progress > 0
+                x: 24
+                y: 4
+                width: 360
+                height: info.y + info.implicitHeight + 22
+                radius: Theme.radius + 9
+                color: Theme.mainBg
+                border.color: Qt.alpha(Player.c1, 0.3)
+                border.width: 1
+                // the effect only runs mid-transition; settled, the card renders directly
+                layer.enabled: progress < 1
+                layer.effect: Dissolve {
+                    progress: card.progress
+                    seed: card.seed
+                    glow: Player.c1
+                    origin: card.spawn
+                    hole: card.closing ? 1 : 0
+                }
+
+                NumberAnimation { id: kickAnim; target: card; property: "kick"; to: 0; duration: 380; easing.type: Easing.OutCubic }
+                Connections {
+                    target: Visualizer
+                    enabled: win.visible
+                    function onBeat(s) {
+                        kickAnim.stop()
+                        card.kick = s
+                        kickAnim.start()
+                        live.item?.sparks.burst(Math.round(10 + s * 30))
+                    }
+                }
+
+                // blurred cover behind everything, darkened towards the controls
+                Art {
+                    id: bg
+                    anchors.fill: parent
+                    sourceSize: Qt.size(160, 160)   // blurred anyway
+                    visible: false
+                }
+                MultiEffect {
+                    anchors.fill: parent
+                    source: bg
+                    autoPaddingEnabled: false
+                    blurEnabled: true
+                    blur: 1
+                    blurMax: 64
+                    saturation: 0.2
+                    brightness: -0.2
+                    opacity: bg.ready ? 0.85 : 0
+                    Behavior on opacity { NumberAnimation { duration: 700 } }
+                }
+                Rectangle {
+                    anchors.fill: parent
+                    gradient: Gradient {
+                        GradientStop { position: 0; color: Qt.alpha(Theme.mainBg, 0.4) }
+                        GradientStop { position: 0.65; color: Qt.alpha(Theme.mainBg, 0.7) }
+                        GradientStop { position: 1; color: Qt.alpha(Theme.mainBg, 0.92) }
+                    }
+                }
+
+                Text {
+                    x: 18
+                    y: 14
+                    text: (win.player?.identity ?? "").toUpperCase()
+                    color: Qt.alpha(Player.c1, 0.7)
+                    font { family: Theme.font; pixelSize: 9; letterSpacing: 2.5; bold: true }
+                }
+
+                Item {
+                    id: stage
+                    width: 340
+                    height: 340
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    y: 12
+
+                    // the live parts exist only while the panel is up
+                    Loader {
+                        id: live
+                        anchors.fill: parent
+                        active: win.visible
+                        sourceComponent: Item {
+                            property alias sparks: sparks
+                            // bass bloom behind the record
+                            Rectangle {
+                                anchors.centerIn: parent
+                                width: 250
+                                height: 250
+                                radius: 125
+                                color: Player.c2
+                                opacity: 0.1 + Visualizer.bass * 0.3 + card.kick * 0.25
+                                layer.enabled: true
+                                layer.effect: MultiEffect { blurEnabled: true; blur: 1; blurMax: 64 }
+                            }
+
+                            // sparks off the ring: a trickle with the bass, a burst on each beat
+                            ParticleSystem { id: sparkSys; running: win.visible }
+                            ImageParticle {
+                                system: sparkSys
+                                source: "qrc:///particleresources/glowdot.png"
+                                color: Player.c1
+                                colorVariation: 0.15
+                                alpha: 0.9
+                            }
+                            Emitter {
+                                id: sparks
+                                system: sparkSys
+                                anchors.centerIn: parent
+                                width: 236
+                                height: 236
+                                shape: EllipseShape { fill: false }
+                                emitRate: Visualizer.active ? 3 + Visualizer.bass * 30 : 0
+                                lifeSpan: 1300
+                                lifeSpanVariation: 400
+                                size: 9
+                                sizeVariation: 5
+                                endSize: 1
+                                velocity: TargetDirection { targetItem: sparks; magnitude: -80; magnitudeVariation: 50 }
+                            }
+                            Friction { system: sparkSys; factor: 0.8 }
+
+                            Ring {
+                                anchors.fill: parent
+                                inner: 116
+                                amp: 50
+                                spokes: 120
+                                thick: 0.5
+                                halo: 0.8 + card.kick * 0.4
+                            }
+                        }
+                    }
+
+                    Disc {
+                        spinning: win.visible
+                        anchors.centerIn: parent
+                        width: 200
+                        height: 200
+                        scale: 1 + card.kick * 0.035
+                    }
+                    MouseArea {
+                        anchors.centerIn: parent
+                        width: 200
+                        height: 200
+                        cursorShape: Qt.PointingHandCursor
+                        property real wheelAcc: 0
+                        onClicked: win.player?.togglePlaying()
+                        onWheel: e => {
+                            wheelAcc += e.angleDelta.y
+                            if (Math.abs(wheelAcc) < 120 || !win.player?.canSeek) return
+                            win.player.position = Math.max(0, Math.min(card.len, card.pos + (wheelAcc > 0 ? 5 : -5)))
+                            wheelAcc = 0
+                        }
+                    }
+                }
+
+                ColumnLayout {
+                    id: info
+                    anchors { left: parent.left; right: parent.right; top: stage.bottom; leftMargin: 24; rightMargin: 24 }
+                    spacing: 3
+
+                    Swap {
+                        id: names
+                        Layout.fillWidth: true
+                        implicitHeight: nameCol.implicitHeight
+                        value: ({ title: win.player?.trackTitle || win.player?.identity || "", artist: win.player?.trackArtist ?? "" })
+                        Column {
+                            id: nameCol
+                            width: parent.width
+                            spacing: 3
+                            Text {
+                                width: parent.width
+                                horizontalAlignment: Text.AlignHCenter
+                                elide: Text.ElideRight
+                                text: names.shown?.title ?? ""
+                                color: Theme.menuFg
+                                font { family: Theme.font; pixelSize: 15; bold: true }
+                            }
+                            Text {
+                                width: parent.width
+                                horizontalAlignment: Text.AlignHCenter
+                                elide: Text.ElideRight
+                                text: names.shown?.artist ?? ""
+                                color: Player.c1
+                                font { family: Theme.font; pixelSize: 12 }
+                            }
+                        }
+                    }
+                    // elapsed | seek bar | remaining; click or drag the bar to seek
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Layout.topMargin: 10
+                        spacing: 10
+                        visible: card.len > 0
+                        Text {
+                            text: win.fmt(seek.dragging ? seek.at * card.len : card.pos)
+                            color: Qt.alpha(Theme.menuFg, 0.6)
+                            font { family: Theme.font; pixelSize: 10 }
+                        }
+                        Item {
+                            id: seek
+                            readonly property bool dragging: seekArea.pressed
+                            readonly property bool hot: seekArea.containsMouse || dragging
+                            property real at: 0   // 0..1 under the pointer while dragging
+                            readonly property real shown: dragging ? at : card.frac
+                            Layout.fillWidth: true
+                            implicitHeight: 14
+
+                            Rectangle {
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: parent.width
+                                height: seek.hot ? 5 : 3
+                                radius: height / 2
+                                color: Qt.alpha("white", 0.12)
+                                Behavior on height { NumberAnimation { duration: 120 } }
+                            }
+                            Rectangle {
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: Math.max(height, parent.width * seek.shown)
+                                height: seek.hot ? 5 : 3
+                                radius: height / 2
+                                color: Player.c1
+                                Behavior on height { NumberAnimation { duration: 120 } }
+                                layer.enabled: true
+                                layer.effect: MultiEffect { shadowEnabled: true; shadowColor: Player.c1; shadowOpacity: 0.8; shadowBlur: 0.6; blurMax: 12; shadowVerticalOffset: 0 }
+                            }
+                            Rectangle {   // knob
+                                property real d: seek.hot ? 12 : 8
+                                x: parent.width * seek.shown - d / 2
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: d
+                                height: d
+                                radius: d / 2
+                                color: Qt.lighter(Player.c1, 1.3)
+                                Behavior on d { NumberAnimation { duration: 120 } }
+                            }
+                            MouseArea {
+                                id: seekArea
+                                anchors.fill: parent
+                                anchors.margins: -4
+                                hoverEnabled: true
+                                enabled: !!win.player?.canSeek
+                                cursorShape: Qt.PointingHandCursor
+                                onPressed: e => seek.at = Math.max(0, Math.min(1, (e.x - 4) / seek.width))
+                                onPositionChanged: e => { if (pressed) seek.at = Math.max(0, Math.min(1, (e.x - 4) / seek.width)) }
+                                onReleased: win.player.position = seek.at * card.len
+                            }
+                        }
+                        Text {
+                            text: "-" + win.fmt(Math.max(0, card.len - (seek.dragging ? seek.at * card.len : card.pos)))
+                            color: Qt.alpha(Theme.menuFg, 0.6)
+                            font { family: Theme.font; pixelSize: 10 }
+                        }
+                    }
+                    RowLayout {
+                        Layout.alignment: Qt.AlignHCenter
+                        Layout.topMargin: 2
+                        spacing: 22
+                        Btn { icon: 0xF04AE; enabled: !!win.player?.canGoPrevious; onClicked: win.player.previous() }
+                        Btn { icon: Player.playing ? 0xF03E4 : 0xF040A; big: true; onClicked: win.player.togglePlaying() }
+                        Btn { icon: 0xF04AD; enabled: !!win.player?.canGoNext; onClicked: win.player.next() }
+                    }
+                }
+            }
+        }
+    }
+
+    component Btn: Rectangle {
+        id: b
+        property int icon
+        property bool big: false
+        signal clicked()
+
+        implicitWidth: big ? 50 : 36
+        implicitHeight: implicitWidth
+        radius: width / 2
+        opacity: enabled ? 1 : 0.35
+        color: big ? Player.c1 : bh.hovered && enabled ? Qt.alpha("white", 0.12) : "transparent"
+        Behavior on color { ColorAnimation { duration: 150 } }
+        scale: bt.pressed ? 0.85 : bh.hovered && enabled ? 1.08 : 1
+        Behavior on scale { SpringAnimation { spring: 7; damping: 0.3; epsilon: 0.002 } }
+        layer.enabled: big
+        layer.effect: MultiEffect { shadowEnabled: true; shadowColor: Player.c1; shadowOpacity: 0.6; shadowBlur: 0.8; blurMax: 24; shadowVerticalOffset: 0 }
+        HoverHandler { id: bh; cursorShape: Qt.PointingHandCursor }
+        TapHandler { id: bt; onTapped: b.clicked() }
+        Text {
+            anchors.centerIn: parent
+            text: Theme.g(b.icon)
+            color: b.big ? Theme.mainBg : Theme.menuFg
+            font { family: Theme.font; pixelSize: b.big ? 24 : 18 }
+        }
+    }
+}
