@@ -96,6 +96,16 @@ hyde.config.start.notifications = ""   -- the bar owns org.freedesktop.Notificat
 hl.plugin.load(os.getenv("HOME") .. "/.config/hypr/plugins/beatglow/beatglow.so")
 
 hl.bind("ALT + Control_R", hl.dsp.exec_cmd("qs -c bar ipc call bar toggle"))
+
+-- Settings is a normal window ("Bar Settings") so it can be moved around; float it at its
+-- own size, or Hyprland tiles it.
+hl.window_rule({
+	name = "bar_settings_float",
+	match = { class = "^org\\.quickshell$", title = "^Bar Settings$" },
+	float = true,
+	center = true,
+	size = "620 540",
+})
 ```
 
 Without HyDE, start it from the startup hook:
@@ -131,6 +141,8 @@ chmod 600 ~/.local/share/quickshell-bar/gcal-ics.url
 | hide / show the bar | `qs -c bar ipc call bar toggle` |
 | quick settings | `qs -c bar ipc call quick toggle`, or rest the pointer on the right edge |
 | now playing | `qs -c bar ipc call media toggle`, or rest the pointer on the media pill |
+| settings | `qs -c bar ipc call settings toggle`, or `... settings page media` to open on a page |
+| change a setting | `qs -c bar ipc call settings set mediaStyle 2` (any key in `Settings.qml`, value as JSON) |
 | do not disturb | `qs -c bar ipc call notifications toggleDnd` |
 
 In the Bluetooth list, click a paired device to connect or disconnect it, click a new one to
