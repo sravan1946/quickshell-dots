@@ -84,7 +84,7 @@ Item {
     property real wheelAcc: 0
     MouseArea {
         id: mouse
-        anchors.fill: parent
+        anchors { fill: parent; topMargin: -Config.pillInset; bottomMargin: -Config.pillInset }
         hoverEnabled: true
         acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
         onPressed: Tip.hide()

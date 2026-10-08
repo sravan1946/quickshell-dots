@@ -12,6 +12,9 @@ import Quickshell.Io
 // the look) and add "Foo" to a pill below. Saving reloads the bar live.
 Singleton {
     readonly property int height: 30
+    // pills sit this far off the bar's top and bottom edges; their hover/click areas reach
+    // back out over it, so a pointer pinned to the screen edge still lands on them
+    readonly property int pillInset: 3
     property bool dnd: false         // do-not-disturb: notification popups hidden, kept until it's turned off
     property bool historyOpen: false // notification history panel is open (popups are suppressed)
     property bool historyPaused: false // stop logging to the history; popups still work as normal

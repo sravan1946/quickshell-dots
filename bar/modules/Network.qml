@@ -6,8 +6,8 @@ import qs
 import qs.components
 
 // network: live down/up rates of the default-route interface over a sparkline.
-// Hover: a card with signal, graph and address (components/HoverCard). Click: the network panel with a
-// bigger graph, details, the Wi-Fi switch and nearby networks to join.
+// Hover: a card with the link, a two-minute graph with its peak, both rates and the addresses
+// (components/HoverCard). Wi-Fi itself (switch, networks, VPN) is the tray icon's panel (components/WifiMenu).
 // Rates are sampled once in NetStats.qml for every bar.
 Mod {
     id: net
@@ -33,7 +33,6 @@ Mod {
     text: iface === "" ? Theme.g(0xF05AA) + " "
         : `<font color="${colDown}">↓${short(down)}</font> <font color="${colUp}">↑${short(up)}</font>`
 
-    onClicked: b => { if (b === Qt.LeftButton) panel.toggle() }
     onHoveredChanged: if (hovered) NetStats.refresh()
 
     // waybar pow_format: 1000-based, one decimal above bytes
@@ -68,75 +67,16 @@ Mod {
     }
 
     // ---- hover card ----
-    // poured out under the pill (components/HoverCard); kept shut while the click panel is up
-    HoverCard { id: hover; content: hoverCard; glow: net.colDown; blocked: panel.visible }
+    // poured out under the pill (components/HoverCard)
+    HoverCard { id: hover; content: hoverCard; glow: net.colDown }
+    Timer { interval: NetStats.interval; running: hover.open; repeat: true; onTriggered: NetStats.refresh() }
     Component {
         id: hoverCard
-        Column {
-            width: 250
-            spacing: 7
-
-            RowLayout {
-                width: parent.width
-                spacing: 8
-                Bars { visible: net.wifi; strength: net.signal }
-                Text {
-                    visible: !net.wifi
-                    text: Theme.g(net.iface === "" ? 0xF05AA : 0xF0200)
-                    color: Theme.mainFg
-                    font { family: Theme.font; pixelSize: 14 }
-                }
-                Text {
-                    Layout.fillWidth: true
-                    text: net.title
-                    color: Theme.mainFg
-                    elide: Text.ElideRight
-                    font { family: Theme.font; pixelSize: 13; bold: true }
-                }
-                Text {
-                    text: net.wifi ? net.signal + "%" : ""
-                    color: Theme.mainFg
-                    opacity: 0.6
-                    font { family: Theme.font; pixelSize: 11 }
-                }
-            }
-            GraphBox { visible: net.iface !== ""; width: parent.width; height: 44; samples: 30 }
-            RowLayout {
-                visible: net.iface !== ""
-                width: parent.width
-                Text { text: "↓ " + net.rate(net.down); color: net.colDown; font { family: Theme.font; pixelSize: 12; bold: true } }
-                Item { Layout.fillWidth: true }
-                Text { text: "↑ " + net.rate(net.up); color: net.colUp; font { family: Theme.font; pixelSize: 12; bold: true } }
-            }
-            Text {
-                visible: net.iface !== ""
-                width: parent.width
-                text: [(net.info.ip ?? "").split("/")[0], net.iface, net.wifi ? net.info.freq : ""].filter(s => s).join(" · ")
-                color: Theme.mainFg
-                opacity: 0.6
-                elide: Text.ElideRight
-                font { family: Theme.font; pixelSize: 11 }
-            }
-        }
-    }
-
-    // ---- click panel ----
-    Timer { interval: NetStats.interval; running: panel.visible; repeat: true; onTriggered: NetStats.refresh() }
-    Timer { id: refreshSoon; interval: 900; onTriggered: { NetStats.refresh(); wifiList.scan() } }
-
-    Dropdown {
-        id: panel
-        target: net
-        closeOnOutsideClick: true
-        padX: 14
-        padY: 14
-        onVisibleChanged: if (visible) NetStats.refresh()
-
         Column {
             width: 330
             spacing: 12
 
-            // header: signal, name, status, Wi-Fi switch
+            // header: signal, name, status
             RowLayout {
                 width: parent.width
                 spacing: 10
@@ -162,11 +102,6 @@ Mod {
                         opacity: 0.6
                         font { family: Theme.font; pixelSize: 11 }
                     }
-                }
-                Toggle {
-                    text: "Wi-Fi"
-                    checked: !!net.info.wifiOn
-                    onToggled: { Util.run(`nmcli radio wifi ${net.info.wifiOn ? "off" : "on"}`); refreshSoon.restart() }
                 }
             }
 
@@ -223,18 +158,6 @@ Mod {
                         font { family: Theme.font; pixelSize: 11; bold: index % 2 === 1 }
                     }
                 }
-            }
-
-            WifiList {
-                id: wifiList
-                visible: !!net.info.wifiOn
-                width: parent.width
-                active: panel.visible
-            }
-
-            PillButton {
-                text: Theme.g(0xF0493) + "  Connection editor"
-                onClicked: { panel.close(); Util.run("nm-connection-editor") }
             }
         }
     }

@@ -69,8 +69,11 @@ Row {
             tip: modelData.tooltipTitle
                 ? `<b>${modelData.tooltipTitle}</b>` + (modelData.tooltipDescription ? "<br>" + modelData.tooltipDescription : "")
                 : modelData.title
+            // nm-applet: our own Wi-Fi panel (components/WifiMenu) instead of its menu
+            readonly property bool nm: modelData.id === "nm-applet"
             onClicked: b => {
-                if (b === Qt.RightButton || (b === Qt.LeftButton && leftOpensMenu)) {
+                if (nm && b !== Qt.MiddleButton) wifi.item.toggle()
+                else if (b === Qt.RightButton || (b === Qt.LeftButton && leftOpensMenu)) {
                     if (modelData.hasMenu) menu.toggle()
                 } else if (b === Qt.LeftButton) modelData.activate()
                 else if (b === Qt.MiddleButton) modelData.secondaryActivate()
@@ -78,6 +81,7 @@ Row {
             onScrolled: s => modelData.scroll(s, false)
 
             Menu { id: menu; target: item; handle: item.modelData.menu }
+            LazyLoader { id: wifi; active: item.nm; WifiMenu { target: item } }
         }
     }
 }

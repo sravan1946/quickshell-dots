@@ -19,7 +19,7 @@ Item {
 
     function close() { dwell.stop(); open = false }
 
-    anchors.fill: parent
+    anchors { fill: parent; topMargin: -Config.pillInset; bottomMargin: -Config.pillInset }
     onBlockedChanged: if (blocked) close()
 
     // passive: sees the pointer over the whole module without taking it from Mod's MouseArea

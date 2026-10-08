@@ -5,14 +5,19 @@ import Quickshell.Io
 import qs
 
 // Nearby Wi-Fi networks to join: saved ones come up directly, open ones join on click,
-// secured new ones ask for the password inline. Scans while `active`.
+// secured new ones ask for the password inline; right-click a saved one to forget it.
+// Scans while `active`.
 // Used by the Network panel (modules/Network.qml) and quick settings.
 Column {
     id: list
 
     property bool active: false
-    property var nearby: []      // [{ssid, signal, secure, inUse}], strongest first
-    readonly property var bySsid: nearby.reduce((m, e) => (m[e.ssid] = e, m), ({}))
+    property int limit: 7
+    property bool hideInUse: false   // when the caller shows the current network itself
+    property var found: []       // [{ssid, signal, secure, inUse}], strongest first
+    readonly property var nearby: found.filter(e => !(hideInUse && e.inUse)).slice(0, limit)
+    readonly property int total: found.filter(e => !(hideInUse && e.inUse)).length
+    readonly property var bySsid: found.reduce((m, e) => (m[e.ssid] = e, m), ({}))
     property var saved: []       // saved Wi-Fi connection names
     property string askFor: ""   // ssid whose password field is open
     property string joining: ""
@@ -21,7 +26,10 @@ Column {
     spacing: 3
     onActiveChanged: if (active) scan(); else { askFor = ""; failed = "" }
 
-    function scan() { if (!scanner.running) scanner.running = true }
+    // the cached list right away, then once the background rescan has had time to land
+    // (`--rescan auto` blocked for seconds whenever the last scan was over 30s old)
+    function scan() { list.fetch(); if (!rescan.running) rescan.running = true }
+    function fetch() { if (!scanner.running) scanner.running = true }
     function join(e) {
         if (e.inUse || joiner.running) return
         failed = ""
@@ -41,7 +49,7 @@ Column {
         id: scanner
         command: ["sh", "-c", `
             nmcli -t -f NAME,TYPE con show | sed -n 's/:802-11-wireless$//p' | sed 's/^/SAVED:/'
-            nmcli -t -f IN-USE,SSID,SIGNAL,SECURITY dev wifi list --rescan auto`]
+            nmcli -t -f IN-USE,SSID,SIGNAL,SECURITY dev wifi list --rescan no`]
         stdout: StdioCollector {
             onStreamFinished: {
                 const saved = [], best = {}
@@ -55,7 +63,7 @@ Column {
                     if (!o || e.inUse || (!o.inUse && e.signal > o.signal)) best[e.ssid] = e
                 }
                 list.saved = saved
-                list.nearby = Object.values(best).sort((a, b) => b.inUse - a.inUse || b.signal - a.signal).slice(0, 7)
+                list.found = Object.values(best).sort((a, b) => b.inUse - a.inUse || b.signal - a.signal)
             }
         }
     }
@@ -72,6 +80,8 @@ Column {
             list.scan()
         }
     }
+    Process { id: rescan; command: ["nmcli", "dev", "wifi", "rescan"]; onExited: relist.restart() }
+    Timer { id: relist; interval: 3500; onTriggered: list.fetch() }
     Timer { interval: 10000; running: list.active; repeat: true; onTriggered: list.scan() }
 
     RowLayout {
@@ -86,9 +96,9 @@ Column {
         Text {
             text: Theme.g(0xF0450)
             color: Theme.mainFg
-            opacity: scanner.running ? 1 : 0.55
+            opacity: relist.running ? 1 : 0.55
             font { family: Theme.font; pixelSize: 12 }
-            RotationAnimator on rotation { running: scanner.running; from: 0; to: 360; duration: 900; loops: Animation.Infinite }
+            RotationAnimator on rotation { running: relist.running; from: 0; to: 360; duration: 900; loops: Animation.Infinite }
             TapHandler { onTapped: list.scan() }
         }
     }
@@ -110,6 +120,10 @@ Column {
                 Behavior on color { ColorAnimation { duration: 120 } }
                 HoverHandler { id: rowHover; cursorShape: entry.e.inUse ? Qt.ArrowCursor : Qt.PointingHandCursor }
                 TapHandler { onTapped: list.join(entry.e) }
+                TapHandler {
+                    acceptedButtons: Qt.RightButton
+                    onTapped: if (list.saved.includes(entry.e.ssid)) { Quickshell.execDetached(["nmcli", "con", "delete", "id", entry.e.ssid]); list.saved = list.saved.filter(n => n !== entry.e.ssid) }
+                }
 
                 RowLayout {
                     anchors { fill: parent; leftMargin: 9; rightMargin: 9 }
@@ -124,8 +138,11 @@ Column {
                     }
                     Text {
                         visible: text !== ""
-                        text: list.joining === entry.e.ssid ? "connecting…" : list.failed === entry.e.ssid ? "failed" : ""
-                        color: list.failed === entry.e.ssid ? "#f7768e" : Theme.actFg
+                        readonly property bool note: list.joining === entry.e.ssid || list.failed === entry.e.ssid
+                        text: list.joining === entry.e.ssid ? "connecting…" : list.failed === entry.e.ssid ? "failed"
+                            : !entry.e.inUse && list.saved.includes(entry.e.ssid) ? "saved" : ""
+                        color: list.failed === entry.e.ssid ? "#f7768e" : note ? Theme.actFg : Theme.mainFg
+                        opacity: note ? 1 : 0.45
                         font { family: Theme.font; pixelSize: 10 }
                     }
                     Text {

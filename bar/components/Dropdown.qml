@@ -17,6 +17,7 @@ PopupWindow {
     property real bgAlpha: 0.97
     property bool closeOnOutsideClick: false
     default property alias content: body.data
+    readonly property alias hovered: cardHover.hovered   // pointer over the card
     readonly property real shadowPad: 16
 
     anchor.item: target
@@ -73,6 +74,8 @@ PopupWindow {
         scale: 0.94 + 0.06 * progress
         transformOrigin: Item.Top
         transform: Translate { y: (1 - wrap.progress) * -10 }
+        // on the card's ancestor, so hovering anything inside it counts
+        HoverHandler { id: cardHover }
 
         Rectangle {
             anchors.fill: parent

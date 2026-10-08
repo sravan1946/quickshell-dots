@@ -21,7 +21,7 @@ Rectangle {
     topRightRadius: shape === "left" || shape === "down" ? 0 : r
     bottomRightRadius: shape === "left" ? 0 : r
 
-    y: shape === "down" ? 0 : 3
+    y: shape === "down" ? 0 : Config.pillInset
     implicitWidth: row.implicitWidth + padL + padR
     implicitHeight: shape === "down" ? 27 : 24
 

@@ -4,7 +4,9 @@ import Quickshell
 import qs
 import qs.components
 
-// clock: left-click opens the calendar, right-click toggles the long format.
+// clock: left-click opens the calendar, right-click toggles the long format. Pinning the
+// pointer to the screen edge above it opens the calendar too, hover-style: it goes again once
+// the pointer leaves the clock and the calendar (no click grab: that needs a real click).
 // In the calendar: scroll or ‹ › to change month, click the title to come back to today,
 // click a day for its Google Calendar events (Cal.qml), click an event to open it,
 // type in the box to add one on that day (opens Google Calendar prefilled).
@@ -26,11 +28,29 @@ Mod {
 
     onClicked: b => {
         if (b === Qt.LeftButton) {
-            cal.shift = 0
-            cal.selected = now
-            if (!panel.visible) Cal.refresh()
-            panel.toggle()
+            if (!panel.visible) open(true)
+            else panel.toggle()
         } else if (b === Qt.RightButton) alt = !alt
+    }
+    function open(grab) {
+        cal.shift = 0
+        cal.selected = now
+        Cal.refresh()
+        panel.closeOnOutsideClick = grab
+        panel.toggle()
+    }
+
+    // the clock's pill touches the top, so y 0 is the screen edge
+    HoverHandler {
+        id: edge
+        readonly property bool atEdge: hovered && point.position.y <= 1
+        onAtEdgeChanged: if (atEdge && !panel.visible) edgeDwell.restart(); else edgeDwell.stop()
+    }
+    Timer { id: edgeDwell; interval: Settings.hoverDelay; onTriggered: clock.open(false) }
+    Timer {
+        interval: 350
+        running: panel.visible && !panel.closeOnOutsideClick && !edge.hovered && !panel.hovered
+        onTriggered: panel.close()
     }
 
     function hm(d) { return Qt.formatTime(d, "HH:mm") }
