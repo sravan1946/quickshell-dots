@@ -3,6 +3,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import Quickshell.Services.Mpris
+import qs
 
 // cava's spectrum of whatever is playing (scripts/cava.conf): 32 bands, stereo layout
 // (left treble .. bass | bass .. right treble), handed out already packed as the vec4
@@ -33,8 +34,8 @@ Singleton {
     // window border): each kick sends one out both ways from the media pill, fast at first
     // and slowing. For the last four beats, newest in x: px its front has travelled, and how
     // bright it still is (0 once spent). Both stop changing once all four are spent.
-    readonly property real waveDur: 1.0
-    readonly property real waveReach: 2600   // px travelled by the end
+    readonly property real waveDur: Settings.waveDur
+    readonly property real waveReach: Settings.waveReach   // px travelled by the end
     readonly property vector4d waveFronts: {
         const a = beatAts
         const f = at => waveReach * (1 - Math.pow(1 - Math.min(1, Math.max(0, (t - at) / waveDur)), 3))
@@ -91,7 +92,7 @@ Singleton {
         if (armed && d > riseMean + 0.9 * sd + 0.025 && t - beatAt >= 0.2) {
             riseMax = Math.max(riseMax, d)
             const s = Math.min(1, d / riseMax)
-            if (s > 0.2) {
+            if (s > 0.2 && Settings.beatEffects) {
                 beatAt = t
                 beatStrength = s
                 beatAts = Qt.vector4d(t, beatAts.x, beatAts.y, beatAts.z)

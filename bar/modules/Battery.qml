@@ -14,10 +14,10 @@ Mod {
     readonly property int secs: st === UPowerDeviceState.Charging ? dev.timeToFull : dev.timeToEmpty
     readonly property string time: secs > 0 ? `${Math.floor(secs / 3600)} h ${Math.floor(secs % 3600 / 60)} min` : ""
     property bool alt: false
-    // waybar battery states (warning 20, critical 10) while discharging; the 10% notification is in shell.qml
+    // waybar battery states (Settings.batteryWarn / batteryLow) while discharging; the low notification is in shell.qml
     readonly property bool draining: st === UPowerDeviceState.Discharging
 
-    fg: draining && cap <= 10 ? "#f7768e" : draining && cap <= 20 ? "#e0af68" : Theme.mainFg
+    fg: draining && cap <= Settings.batteryLow ? "#f7768e" : draining && cap <= Settings.batteryWarn ? "#e0af68" : Theme.mainFg
 
     visible: dev.isPresent
     minChars: 6   // "ico 100%": the right section is right-anchored, so 99 -> 100 would nudge the pills

@@ -6,14 +6,14 @@ import qs
 import qs.components
 
 // network: live down/up rates of the default-route interface over a sparkline.
-// Hover: a card with signal, graph and address. Click: the network panel with a
+// Hover: a card with signal, graph and address (components/HoverCard). Click: the network panel with a
 // bigger graph, details, the Wi-Fi switch and nearby networks to join.
 // Rates are sampled once in NetStats.qml for every bar.
 Mod {
     id: net
 
-    readonly property string colDown: "#99ffdd"
-    readonly property string colUp: "#ffcc66"
+    readonly property color colDown: Theme.color(Settings.netColDown, "#99ffdd")
+    readonly property color colUp: Theme.color(Settings.netColUp, "#ffcc66")
 
     readonly property string iface: NetStats.iface
     readonly property real down: NetStats.down
@@ -32,7 +32,6 @@ Mod {
     minChars: 15
     text: iface === "" ? Theme.g(0xF05AA) + " "
         : `<font color="${colDown}">↓${short(down)}</font> <font color="${colUp}">↑${short(up)}</font>`
-    tipItem: hoverCard
 
     onClicked: b => { if (b === Qt.LeftButton) panel.toggle() }
     onHoveredChanged: if (hovered) NetStats.refresh()
@@ -69,6 +68,8 @@ Mod {
     }
 
     // ---- hover card ----
+    // poured out under the pill (components/HoverCard); kept shut while the click panel is up
+    HoverCard { id: hover; content: hoverCard; glow: net.colDown; blocked: panel.visible }
     Component {
         id: hoverCard
         Column {

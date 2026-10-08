@@ -53,7 +53,7 @@ Item {
     // a short dwell, so sweeping the pointer across the bar doesn't pop it open
     Timer {
         id: dwell
-        interval: 220
+        interval: Settings.hoverDelay
         onTriggered: {
             Player.show(m.screenName, m.mapToItem(null, m.width / 2, 0).x, pillArea.mapToItem(null, pillArea.mouseX, pillArea.mouseY))
             Player.pillHovered = true

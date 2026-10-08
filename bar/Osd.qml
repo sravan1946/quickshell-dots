@@ -24,7 +24,7 @@ Scope {
 
     // values arrive as Pipewire and sysfs load; nothing before this was the user
     property bool armed: false
-    Timer { interval: 2000; running: true; onTriggered: osd.armed = true }
+    Timer { interval: Settings.osdArmDelay; running: true; onTriggered: osd.armed = true }
 
     function show(icon, label, value, muted) {
         if (!armed || Config.quickOpen) return   // quick settings shows these itself
@@ -32,7 +32,7 @@ Scope {
         shown = true
         hide.restart()
     }
-    Timer { id: hide; interval: 1500; onTriggered: osd.shown = false }
+    Timer { id: hide; interval: Settings.osdTimeout; onTriggered: osd.shown = false }
 
     function showSink() {
         const a = sink.audio, v = a.volume

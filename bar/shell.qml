@@ -17,7 +17,7 @@ ShellRoot {
     Osd {}
     NowPlaying {}
 
-    // one critical notification per discharge once the battery hits 10% (the pill turns red too)
+    // one critical notification per discharge once the battery hits Settings.batteryLow (the pill turns red too)
     Connections {
         target: UPower.displayDevice
         property bool warned: false
@@ -25,7 +25,7 @@ ShellRoot {
             const d = UPower.displayDevice
             const cap = d.percentage <= 1 ? d.percentage * 100 : d.percentage
             if (d.state !== UPowerDeviceState.Discharging) warned = false
-            else if (cap <= 10 && !warned) {
+            else if (cap <= Settings.batteryLow && !warned) {
                 warned = true
                 Quickshell.execDetached(["notify-send", "-u", "critical", "-a", "Battery", "-i", "battery-caution", "Battery low", `${Math.round(cap)}% left, plug in`])
             }
@@ -33,6 +33,9 @@ ShellRoot {
     }
 
     BeatGlow {}
+
+    // one settings GUI for all monitors; opens on the focused one via Config.openSettings()
+    SettingsPanel {}
 
     IpcHandler {
         target: "quick"

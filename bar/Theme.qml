@@ -3,20 +3,37 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 
-// Colours come from the same files waybar's style.css imports, so HyDE theme
-// switches still recolour the bar. Defaults are the current theme.css values.
+// Colours: every one is a Settings value that is either "@name", one of HyDE's colour
+// variables (read from the same files waybar's style.css imports, so theme switches still
+// recolour the bar), or a fixed "#hex". The literals below are the fallbacks for a variable
+// HyDE doesn't define (yet: the files load async).
 Singleton {
     id: root
 
-    property color barBg: Qt.rgba(0, 0, 0, 0.1)
-    property color mainBg: "#24283b"
-    property color mainFg: "#7aa2f7"
-    property color actBg: "#bb9af7"
-    property color actFg: "#b4f9f8"
-    property color hvrBg: "#7aa2f7"
-    property color hvrFg: "#cfc9c2"
-    // GTK menus (waybar's tray/power menus) take text colour from the GTK theme
-    property color menuFg: "#c0caf5"
+    // every HyDE @define-color, resolved: name -> color. "gtk-fg" is the GTK theme's text
+    // colour (waybar's tray/power menus take theirs from it).
+    property var defs: ({})
+    property color gtkText: "#c0caf5"
+    function color(spec, fallback) {
+        if (typeof spec !== "string" || spec === "") return fallback
+        if (!spec.startsWith("@")) return spec
+        const k = spec.slice(1)
+        return k === "gtk-fg" ? gtkText : (defs[k] ?? fallback)
+    }
+    function has(name) { return name === "gtk-fg" || defs[name] !== undefined }
+    // the variables offered in the settings colour picker, in palette order
+    readonly property var themeVars: ["bar-bg", "main-bg", "main-fg", "wb-act-bg", "wb-act-fg", "wb-hvr-bg", "wb-hvr-fg", "gtk-fg"]
+    readonly property var paletteVars: [1, 2, 3, 4].map(n =>
+        [`wallbash_pry${n}`, `wallbash_txt${n}`].concat([1, 2, 3, 4, 5, 6, 7, 8, 9].map(i => `wallbash_${n}xa${i}`)))
+
+    property color barBg: color(Settings.themeBarBg, Qt.rgba(0, 0, 0, 0.1))
+    property color mainBg: color(Settings.themeMainBg, "#24283b")
+    property color mainFg: color(Settings.themeMainFg, "#7aa2f7")
+    property color actBg: color(Settings.themeActBg, "#bb9af7")
+    property color actFg: color(Settings.themeActFg, "#b4f9f8")
+    property color hvrBg: color(Settings.themeHvrBg, "#7aa2f7")
+    property color hvrFg: color(Settings.themeHvrFg, "#cfc9c2")
+    property color menuFg: color(Settings.themeMenuFg, "#c0caf5")
 
     // global.css: JetBrainsMono Nerd Font 10px; border-radius.css: 10pt
     readonly property string font: "JetBrainsMono Nerd Font"
@@ -52,7 +69,7 @@ Singleton {
                 f="$d/$n/gtk-3.0/gtk.css"
                 [ -f "$f" ] && grep -ohE '@define-color theme_fg_color [^;]+' "$f" | head -1 | cut -d' ' -f3 && break
             done`]
-        stdout: StdioCollector { onStreamFinished: { const c = text.trim(); if (c) root.menuFg = c } }
+        stdout: StdioCollector { onStreamFinished: { const c = text.trim(); if (c) root.gtkText = c } }
     }
 
     function apply() {
@@ -70,13 +87,8 @@ Singleton {
             const p = rgba[1].split(",").map(Number)
             return Qt.rgba(p[0] / 255, p[1] / 255, p[2] / 255, p.length > 3 ? p[3] : 1)
         }
-        const set = (prop, key) => { const c = resolve(defs[key], 0); if (c !== undefined) root[prop] = c }
-        set("barBg", "bar-bg")
-        set("mainBg", "main-bg")
-        set("mainFg", "main-fg")
-        set("actBg", "wb-act-bg")
-        set("actFg", "wb-act-fg")
-        set("hvrBg", "wb-hvr-bg")
-        set("hvrFg", "wb-hvr-fg")
+        const out = {}
+        for (const k in defs) { const c = resolve(defs[k], 0); if (c !== undefined) out[k] = c }
+        root.defs = out
     }
 }

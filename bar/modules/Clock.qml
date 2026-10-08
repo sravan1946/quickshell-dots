@@ -19,7 +19,7 @@ Mod {
 
     text: alt
         ? Qt.formatDateTime(now, "HH:mm") + " " + Theme.g(0xF00ED) + " " + Qt.formatDateTime(now, "dd·MM·yy")
-        : Qt.formatDateTime(now, "hh:mm AP")
+        : Qt.formatDateTime(now, Settings.clock24h ? "HH:mm" : "hh:mm AP")
     tip: panel.visible ? "" : Qt.formatDate(now, "dddd, d MMMM yyyy")
         + (Cal.next ? `<br><font color="${Theme.actFg}">${Theme.g(0xF00F0)} ${nextText(Cal.next)}</font>` : "")
         + "<br>Click: calendar · Right-click: format"

@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Effects
 import Quickshell
+import Quickshell.Io
 import Quickshell.Wayland
 import Quickshell.Hyprland
 import Quickshell.Widgets
@@ -14,7 +15,7 @@ import qs.components
 
 // Quick settings, one per monitor. Rest the pointer on the right screen edge (top part,
 // below the bar) and the panel pours out of that point like liquid
-// (components/Dissolve.qml); once the pointer leaves, a hole opens where it went out and
+// (components/LiquidCard.qml); once the pointer leaves, a hole opens where it went out and
 // eats the panel away (the Now Playing panel's animation). The Wi-Fi and Bluetooth tiles'
 // chevrons pull out a device list under the tiles.
 // Only the outer right edge is hot: an edge shared with another monitor would fire on
@@ -42,28 +43,50 @@ Scope {
 
     PwObjectTracker { objects: [root.sink, root.src] }
 
+    // ---- power-profiles-daemon (powerprofilesctl) ----
+    // Current profile + whether the tool exists at all. `powerprofilesctl get` prints the
+    // active profile (power-saver | balanced | performance) or fails if ppd/the CLI is
+    // missing -- in which case ppdAvailable stays false and the tile degrades to a no-op.
+    property string ppProfile: ""
+    property bool ppAvailable: false
+    readonly property var ppOrder: ["power-saver", "balanced", "performance"]
+    function ppIcon(p) {
+        return p === "power-saver" ? 0xF0335          // leaf
+            : p === "performance" ? 0xF0E31           // rocket-launch
+            : 0xF140B                                 // scale-balance (balanced)
+    }
+    function ppRefresh() { ppGet.running = true }
+    function ppCycle() {
+        if (!ppAvailable) return
+        const i = ppOrder.indexOf(ppProfile)
+        const next = ppOrder[(i + 1) % ppOrder.length]
+        ppSet.command = ["powerprofilesctl", "set", next]
+        ppSet.running = true
+    }
+    Process {
+        id: ppGet
+        command: ["powerprofilesctl", "get"]
+        stdout: StdioCollector {
+            onStreamFinished: { const p = text.trim(); if (p) { root.ppProfile = p; root.ppAvailable = true } }
+        }
+        onExited: code => { if (code !== 0) root.ppAvailable = false }
+    }
+    Process {
+        id: ppSet
+        onExited: root.ppRefresh()
+    }
+    // read the current profile when the panel opens (and once at startup)
+    Component.onCompleted: ppRefresh()
+
     onOpenChanged: {
         Config.quickOpen = open
         if (open) {
             NetStats.refresh()
-            card.seed = Math.random() * 100
-            card.spawn = Qt.vector2d(1 + 8 / card.width, Math.max(0, Math.min(1, root.edgeY / card.height)))
-            card.closing = false
-            burn.stop()
-            form.restart()
-        } else {
-            // settled: eat it away from where the pointer left; still forming: drain it back
-            if (card.progress >= 1) {
-                card.spawn = Qt.vector2d((hover.last.x - card.x) / card.width, hover.last.y / card.height)
-                card.closing = true
-            }
-            form.stop()
-            burn.restart()
-        }
+            ppRefresh()
+            // out of the screen edge (8px right of the card) where the pointer touched it
+            card.pour(Qt.point(card.x + card.width + 8, card.y + Math.max(0, Math.min(card.height, root.edgeY))))
+        } else card.drain(hover.last)
     }
-    // same timing as the Now Playing panel
-    NumberAnimation { id: form; target: card; property: "progress"; to: 1; duration: 700; easing.type: Easing.OutQuart }
-    NumberAnimation { id: burn; target: card; property: "progress"; to: 0; duration: 420; easing.type: Easing.OutCubic; onFinished: root.section = "" }
     Connections {
         target: Config
         function onToggleQuick() {
@@ -92,7 +115,7 @@ Scope {
     PanelWindow {
         id: edgeWin
         screen: root.screen
-        visible: root.outerRight
+        visible: root.outerRight && Settings.quickEdge
         anchors { top: true; right: true }
         margins.top: Config.height
         implicitWidth: 10
@@ -179,25 +202,11 @@ Scope {
         // the card plus the gap to the screen edge: a pointer pressed against the edge stays "on" it
         Item { id: hitArea; x: card.x; width: win.width - card.x; height: card.height }
 
-        // analytic shadow: no offscreen blur to redo on every frame of a list sliding open
-        RectangularShadow {
-            anchors.fill: card
-            radius: card.radius
-            opacity: Math.max(0, (card.progress - 0.8) / 0.2)   // only once the blob has filled the card
-            color: Qt.alpha("black", 0.5)
-            blur: 32
-            offset.y: 5
-        }
-
-        Rectangle {
+        LiquidCard {
             id: card
             readonly property real fullW: 348
             readonly property real fullH: body.implicitHeight + 32
-            property real progress: 0
-            property real seed: 0
-            property vector2d spawn: Qt.vector2d(1, 0)   // Dissolve origin, frozen per transition
-            property bool closing: false
-            visible: progress > 0
+            onClosed: root.section = ""
 
             x: win.width - width - 8
             width: fullW
@@ -206,15 +215,6 @@ Scope {
             color: Qt.alpha(Theme.mainBg, 0.97)
             border.color: Qt.alpha(Theme.mainFg, 0.35)
             border.width: 1
-            // the effect only runs mid-transition; settled, the card renders directly (crisp text)
-            layer.enabled: progress < 1
-            // opens at the screen edge (8px right of the card) where the pointer was
-            layer.effect: Dissolve {
-                progress: card.progress
-                seed: card.seed
-                origin: card.spawn
-                hole: card.closing ? 1 : 0
-            }
 
             ColumnLayout {
                 id: body
@@ -286,6 +286,23 @@ Scope {
                         sub: Config.caffeine ? "Staying awake" : "Off"
                         on: Config.caffeine
                         onClicked: Config.caffeine = !Config.caffeine
+                    }
+                    Tile {
+                        // power-profiles-daemon: show current profile, click to cycle
+                        icon: root.ppAvailable ? root.ppIcon(root.ppProfile) : 0xF06CA
+                        label: "Power profile"
+                        sub: !root.ppAvailable ? "Unavailable"
+                            : root.ppProfile === "power-saver" ? "Power saver"
+                            : root.ppProfile === "performance" ? "Performance" : "Balanced"
+                        on: root.ppAvailable && root.ppProfile === "performance"
+                        onClicked: root.ppCycle()
+                    }
+                    Tile {
+                        // open the central settings GUI; close the quick panel first
+                        icon: 0xF0493   // cog
+                        label: "Settings"
+                        sub: "Configure bar"
+                        onClicked: { root.open = false; Config.openSettings() }
                     }
                 }
 

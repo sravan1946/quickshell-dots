@@ -20,6 +20,8 @@ Singleton {
     property bool caffeine: false    // idle inhibitor, shared by every bar's Idle module and quick settings
     property bool quickOpen: false   // a quick-settings panel is open (the OSD stays quiet meanwhile)
     signal toggleQuick()             // `qs -c bar ipc call quick toggle`: open/close it on the focused monitor
+    property bool settingsOpen: false // the central settings GUI (SettingsPanel) is open
+    signal openSettings()            // asks the one SettingsPanel to open on the focused monitor
     property bool barVisible: true   // toggled by `qs -c bar ipc call bar toggle` (SUPER+CTRL+B)
 
     // DND survives qs restarts
@@ -37,7 +39,8 @@ Singleton {
     }
 
     readonly property var left: [
-        { shape: "right", padL: 4, modules: ["Workspaces"] },
+        { shape: "right", padL: 4, padR: 4, modules: ["SysStats"] },
+        { padL: 4, modules: ["Workspaces"] },
         { padL: 0, padR: 0, modules: ["Media"] },
     ]
     readonly property var center: [

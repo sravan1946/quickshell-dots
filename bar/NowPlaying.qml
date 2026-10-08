@@ -13,7 +13,7 @@ import qs.components
 // Now Playing panel, shown while the pointer rests on the bar's media pill
 // (modules/Media.qml) or with `qs -c bar ipc call media toggle`. Pours out of the point
 // where the pointer rested, and on leaving vanishes from the point where the pointer
-// went out, a hole spreading from there (Player.origin, components/Dissolve). A record
+// went out, a hole spreading from there (Player.origin, components/LiquidCard). A record
 // (components/Disc) turns inside a radial spectrum (components/Ring) and throws sparks
 // on the beat; it is all tinted from the cover art
 // (Player palette) over a blurred copy of it. Click the record to play/pause, scroll it
@@ -51,25 +51,15 @@ Scope {
             WlrLayershell.namespace: "nowplaying"
 
             onOpenChanged: {
-                // pour out of / drain into Player.origin, frozen for this transition
-                card.spawn = Qt.vector2d((Player.origin.x - win.margins.left - card.x) / card.width,
-                                         (Player.origin.y - win.margins.top - card.y) / card.height)
-                card.closing = !open
+                // pour out of / drain into Player.origin (on screen; the card is in window coordinates)
+                const p = Qt.point(Player.origin.x - win.margins.left, Player.origin.y - win.margins.top)
                 if (open) {
-                    card.seed = Math.random() * 100
-                    burn.stop()
-                    form.restart()
+                    card.pour(p)
                     if (!Player.pillHovered) { closer.interval = 3000; closer.restart() }   // IPC: time to move the pointer onto it
                     Player.refreshPos()
-                } else {
-                    form.stop()
-                    burn.restart()
-                }
+                } else card.drain(p)
             }
             onPlayerChanged: if (!player) Player.open = false
-            NumberAnimation { id: form; target: card; property: "progress"; to: 1; duration: 700; easing.type: Easing.OutQuart }
-            // closing: a hole opens where the pointer left and spreads, fast then settling
-            NumberAnimation { id: burn; target: card; property: "progress"; to: 0; duration: 420; easing.type: Easing.OutCubic }
 
             Timer { id: closer; onTriggered: if (!hover.hovered && !Player.pillHovered) Player.open = false }
             Connections {
@@ -95,27 +85,13 @@ Scope {
 
             function fmt(s) { return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}` }
 
-            Rectangle {   // shadow, once the blob has filled the card
-                anchors.fill: card
-                radius: card.radius
-                opacity: Math.max(0, (card.progress - 0.8) / 0.2)
-                color: Theme.mainBg
-                layer.enabled: true
-                layer.effect: MultiEffect { shadowEnabled: true; shadowColor: "black"; shadowOpacity: 0.55; shadowBlur: 1; shadowVerticalOffset: 6; blurMax: 40 }
-            }
-
-            ClippingRectangle {
+            LiquidCard {
                 id: card
-                property real progress: 0
-                property real seed: 0
                 property real kick: 0   // 0..1, jumps on a beat and eases off
-                property vector2d spawn: Qt.vector2d(0.5, 0)   // Dissolve origin, 0..1 of the card (may sit outside)
-                property bool closing: false
                 readonly property real len: Player.length
                 readonly property real pos: Player.pos
                 readonly property real frac: Player.frac
 
-                visible: progress > 0
                 x: 24
                 y: 4
                 width: 360
@@ -124,15 +100,7 @@ Scope {
                 color: Theme.mainBg
                 border.color: Qt.alpha(Player.c1, 0.3)
                 border.width: 1
-                // the effect only runs mid-transition; settled, the card renders directly
-                layer.enabled: progress < 1
-                layer.effect: Dissolve {
-                    progress: card.progress
-                    seed: card.seed
-                    glow: Player.c1
-                    origin: card.spawn
-                    hole: card.closing ? 1 : 0
-                }
+                glow: Player.c1
 
                 NumberAnimation { id: kickAnim; target: card; property: "kick"; to: 0; duration: 380; easing.type: Easing.OutCubic }
                 Connections {

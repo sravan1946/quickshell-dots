@@ -124,7 +124,7 @@ Scope {
                 // expireTimeout arrives in ms (the docs say seconds); <= 0 means server default; critical never expires
                 Timer {
                     running: !hover.hovered && !card.critical && !Config.dnd
-                    interval: card.modelData.expireTimeout > 0 ? card.modelData.expireTimeout : 6000
+                    interval: card.modelData.expireTimeout > 0 ? card.modelData.expireTimeout : Settings.notifTimeout
                     onTriggered: card.modelData.tracked = false
                 }
                 HoverHandler { id: hover }
