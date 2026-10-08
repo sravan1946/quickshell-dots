@@ -57,14 +57,25 @@ Row {
             readonly property string themeIcon: modelData.icon.startsWith("image://icon/") ? modelData.icon.slice(13).split("?")[0] : ""
             readonly property string themePath: decodeURIComponent((modelData.icon.match(/[?&]path=([^&]+)/) ?? [])[1] ?? "")
             property string resolved: ""
-            onThemeIconChanged: { resolved = ""; finder.running = false; finder.running = themeIcon !== "" }
+            property string resolvedFor: ""
+            onThemeIconChanged: finder.running = themeIcon !== ""
             Component.onCompleted: finder.running = themeIcon !== ""
+            // running = false doesn't stop a live lookup at once, so when the icon flips fast
+            // (nm-applet on reconnect) the old name's lookup can land last: the name goes out
+            // first, a stale answer is ignored and the lookup reruns for the current name
             Process {
                 id: finder
-                command: ["sh", "-c", Util.findIcon, "sh", item.themeIcon, item.themePath]
-                stdout: StdioCollector { onStreamFinished: item.resolved = text.trim() ? "file://" + text.trim() : "" }
+                command: ["sh", "-c", 'echo "$1"; ' + Util.findIcon, "sh", item.themeIcon, item.themePath]
+                onRunningChanged: if (!running && item.themeIcon !== "" && item.resolvedFor !== item.themeIcon) running = true
+                stdout: StdioCollector {
+                    onStreamFinished: {
+                        const [name, file] = text.split("\n")
+                        item.resolvedFor = name
+                        item.resolved = file ? "file://" + file : ""
+                    }
+                }
             }
-            icon: resolved || modelData.icon
+            icon: resolvedFor === themeIcon && resolved || modelData.icon
             // waybar: bold title, then the description (SNI allows basic markup there)
             tip: modelData.tooltipTitle
                 ? `<b>${modelData.tooltipTitle}</b>` + (modelData.tooltipDescription ? "<br>" + modelData.tooltipDescription : "")
