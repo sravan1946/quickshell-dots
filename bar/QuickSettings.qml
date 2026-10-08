@@ -229,7 +229,7 @@ Scope {
                     spacing: 8
                     Text {
                         visible: root.bat.isPresent
-                        text: Util.pick([0xF008E, 0xF007A, 0xF007B, 0xF007C, 0xF007D, 0xF007E, 0xF007F, 0xF0080, 0xF0081, 0xF0082, 0xF0079], root.batPct)
+                        text: Util.pick(Util.batteryIcons, root.batPct)
                             + `  ${root.batPct}%`
                         color: Theme.mainFg
                         font { family: Theme.font; pixelSize: 13; bold: true }

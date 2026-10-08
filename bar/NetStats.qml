@@ -70,8 +70,7 @@ Singleton {
             onStreamFinished: {
                 const o = {}
                 for (const l of text.split("\n")) {
-                    // nmcli -t escapes ":" inside values as "\\:" (no regex lookbehind in Qt's JS)
-                    const kv = l.replace(/\\:/g, "\u0001").split(":").map(s => s.replace(/\u0001/g, ":"))
+                    const kv = Util.nmFields(l)
                     if (kv[0] === "GENERAL.CONNECTION") o.conn = kv[1]
                     else if (kv[0] === "IP") o.ip = kv[1]
                     else if (kv[0] === "*") { o.ssid = kv[1]; o.signal = kv[2]; o.freq = kv[3] }

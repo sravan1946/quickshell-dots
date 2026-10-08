@@ -13,6 +13,12 @@ Singleton {
         const i = Math.floor(pct / Math.max(1, Math.floor(100 / icons.length)))
         return String.fromCodePoint(icons[Math.max(0, Math.min(icons.length - 1, i))])
     }
+    // battery-outline, battery-10 … battery-90, battery: for pick()
+    readonly property var batteryIcons: [0xF008E, 0xF007A, 0xF007B, 0xF007C, 0xF007D, 0xF007E, 0xF007F, 0xF0080, 0xF0081, 0xF0082, 0xF0079]
+
+    // one `nmcli -t` line split into fields; nmcli escapes ":" inside values as "\\:"
+    // (no regex lookbehind in Qt's JS)
+    function nmFields(line) { return line.replace(/\\:/g, "\u0001").split(":").map(s => s.replace(/\u0001/g, ":")) }
 
     // Icon-theme file lookup for `sh -c findIcon sh <name> <extra dir> <size dirs>`: the extra
     // dir first, then the theme, its Inherits chain and hicolor, trying the size dirs in order

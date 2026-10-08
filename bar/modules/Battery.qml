@@ -5,12 +5,11 @@ import qs.components
 
 // battery: click toggles time remaining.
 Mod {
-    readonly property var icons: [0xF008E, 0xF007A, 0xF007B, 0xF007C, 0xF007D, 0xF007E, 0xF007F, 0xF0080, 0xF0081, 0xF0082, 0xF0079]
     readonly property var dev: UPower.displayDevice
     readonly property int cap: Math.round(dev.percentage <= 1 ? dev.percentage * 100 : dev.percentage)
     readonly property int st: dev.state
     readonly property bool plugged: st === UPowerDeviceState.Charging || st === UPowerDeviceState.PendingCharge   // waybar "Full" uses the plain format
-    readonly property string ico: Util.pick(icons, cap)
+    readonly property string ico: Util.pick(Util.batteryIcons, cap)
     readonly property int secs: st === UPowerDeviceState.Charging ? dev.timeToFull : dev.timeToEmpty
     readonly property string time: secs > 0 ? `${Math.floor(secs / 3600)} h ${Math.floor(secs % 3600 / 60)} min` : ""
     property bool alt: false

@@ -86,8 +86,7 @@ Dropdown {
             onStreamFinished: {
                 const vpns = [], l = { dns: [] }
                 for (const line of text.split("\n")) {
-                    // nmcli -t escapes ":" inside values as "\\:"
-                    const f = line.replace(/\\:/g, "\u0001").split(":").map(s => s.replace(/\u0001/g, ":"))
+                    const f = Util.nmFields(line)
                     const k = f[0], v = f.slice(1).join(":")
                     if (k === "DEV") menu.dev = v
                     else if (k === "NET") menu.networking = v === "enabled"
@@ -262,13 +261,11 @@ Dropdown {
                     width: parent.width
                     spacing: 10
                     // ---- the hotspot while it's on: name, password, QR to join ----
-                    Rectangle {
+                    Card {
                         visible: menu.hotspot
+                        accent: true
                         width: parent.width
                         height: spotCol.implicitHeight
-                        radius: 12
-                        color: Qt.alpha(Theme.actBg, 0.12)
-                        border.color: Qt.alpha(Theme.actBg, 0.45)
                         Column {
                             id: spotCol
                             x: 10
@@ -334,14 +331,11 @@ Dropdown {
                     }
 
                     // ---- the current network; details and actions fold out ----
-                    Rectangle {
+                    Card {
                         visible: menu.linked && !menu.hotspot
                         width: parent.width
                         height: cur.implicitHeight
-                        radius: 12
-                        color: Qt.alpha(Theme.mainFg, 0.06)
-                        border.color: Qt.alpha(Theme.actBg, menu.details ? 0.4 : 0)
-                        Behavior on border.color { ColorAnimation { duration: 150 } }
+                        border.color: Qt.alpha(Theme.actBg, menu.details ? 0.4 : 0)   // rimmed while unfolded
 
                         Column {
                             id: cur
@@ -538,43 +532,6 @@ Dropdown {
         networks.connect(hidSsid.text, ["nmcli", "--ask", "dev", "wifi", "connect", hidSsid.text, "hidden", "yes"], hidPw.text)
     }
 
-    // label over a value; click copies the value
-    component Cell: Rectangle {
-        id: cell
-        property string label
-        property string value
-        property string copy: value   // what a click copies, when it isn't what's shown
-        property bool copied: false
-        Layout.fillWidth: true
-        Layout.preferredWidth: 1
-        implicitHeight: 36
-        radius: 9
-        color: Qt.alpha(Theme.mainFg, cellHover.hovered ? 0.12 : 0.05)
-        Behavior on color { ColorAnimation { duration: 120 } }
-        HoverHandler { id: cellHover; cursorShape: Qt.PointingHandCursor }
-        TapHandler {
-            onTapped: if (cell.copy) { Quickshell.execDetached(["wl-copy", cell.copy]); cell.copied = true; copiedTimer.restart() }
-        }
-        Timer { id: copiedTimer; interval: 1200; onTriggered: cell.copied = false }
-        Column {
-            anchors { fill: parent; leftMargin: 9; rightMargin: 8; topMargin: 5 }
-            spacing: 1
-            Text {
-                text: cell.copied ? "COPIED" : cell.label.toUpperCase()
-                color: cell.copied ? Theme.actFg : Theme.mainFg
-                opacity: cell.copied ? 1 : 0.5
-                font { family: Theme.font; pixelSize: 8; bold: true; letterSpacing: 1 }
-            }
-            Text {
-                width: parent.width
-                text: cell.value || "—"
-                color: Theme.mainFg
-                elide: Text.ElideRight
-                font { family: Theme.font; pixelSize: 11; bold: true }
-            }
-        }
-    }
-
     // half of the Wi-Fi | VPN switch; a dot when that side is connected
     component Tab: Item {
         id: tb
@@ -602,36 +559,6 @@ Dropdown {
                 height: 6
                 radius: 3
                 color: Theme.actFg
-            }
-        }
-    }
-
-    component Field: Rectangle {
-        property string hint
-        property bool secret: false
-        property alias text: input.text
-        signal accepted()
-        function grab() { input.forceActiveFocus() }
-        implicitHeight: 26
-        radius: 8
-        color: Qt.alpha(Theme.mainFg, 0.08)
-        border.color: input.activeFocus ? Theme.mainFg : Qt.alpha(Theme.mainFg, 0.25)
-        TextInput {
-            id: input
-            anchors { fill: parent; leftMargin: 9; rightMargin: 9 }
-            verticalAlignment: TextInput.AlignVCenter
-            echoMode: parent.secret ? TextInput.Password : TextInput.Normal
-            color: Theme.mainFg
-            font { family: Theme.font; pixelSize: 12 }
-            clip: true
-            onAccepted: parent.accepted()
-            Text {
-                anchors.verticalCenter: parent.verticalCenter
-                visible: input.text === ""
-                text: parent.parent.hint
-                color: Theme.mainFg
-                opacity: 0.4
-                font: input.font
             }
         }
     }

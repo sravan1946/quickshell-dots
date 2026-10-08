@@ -60,16 +60,14 @@ Dropdown {
         // ---- connected devices ----
         Repeater {
             model: ScriptModel { values: menu.on ? menu.connected : [] }
-            Rectangle {
+            Card {
                 id: card
                 required property var modelData
                 readonly property var d: modelData
                 readonly property bool leaving: d.state === BluetoothDeviceState.Disconnecting
+                accent: true
                 width: parent.width
                 height: 52
-                radius: 12
-                color: Qt.alpha(Theme.actBg, 0.12)
-                border.color: Qt.alpha(Theme.actBg, 0.45)
                 RowLayout {
                     anchors { fill: parent; leftMargin: 12; rightMargin: 10 }
                     spacing: 10
