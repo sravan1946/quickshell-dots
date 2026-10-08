@@ -4,8 +4,8 @@ import Quickshell
 import qs
 import qs.components
 
-// Now playing pill. The pill itself is the visualizer (shaders/pill.frag): an EQ behind
-// frosted glass glowing up from its floor, the track progress along its bottom edge and a
+// Now playing pill. The pill itself is the visualizer (shaders/pill.frag): by default an EQ
+// behind frosted glass glowing up from its floor (four other backdrops in Settings.mediaStyle), the track progress along its bottom edge and a
 // faint rim flash on the beat, all in the cover art's colours (Player palette). The cover
 // glows with the bass and greys out on pause; titles slide in on a new track and scroll,
 // edge-faded, when they don't fit. Resting the pointer on it shows the Now Playing panel
@@ -15,6 +15,8 @@ Item {
     id: m
     readonly property var player: Player.player
     readonly property string screenName: QsWindow.window?.screen?.name ?? ""
+    onScreenNameChanged: if (screenName) Player.pills[screenName] = m
+    Component.onDestruction: if (Player.pills[screenName] === m) delete Player.pills[screenName]
     readonly property string title: player?.trackTitle || player?.identity || ""
     // beat response, run on Visualizer's frame clock (no animation timers): each of the
     // last four beats' rim lights goes 0 -> 1 over 650 ms (`sweeps`), `kick` is a 0..1 punch
@@ -52,8 +54,13 @@ Item {
     readonly property real textMin: 130   // short titles still get a pill wide enough to show the spectrum
     readonly property real textMax: 190
     readonly property real textW: Math.max(textMin, Math.min(line.implicitWidth, textMax))
+    // backdrop style (Settings.mediaStyle): 0 columns, 1 ambient field, 2 mini EQ, 3 spectrum
+    // strip, 4 waveform tail. The EQ and the tail get room of their own beside the text.
+    readonly property int style: Settings.mediaStyle
+    readonly property real eqW: style === 2 ? 22 : 0      // room for the mini EQ
+    readonly property real waveW: style === 4 ? 44 : 0    // room for the waveform tail
     height: parent ? parent.height : 24
-    implicitWidth: player && !Player.idle ? 32 + textW + 14 : 0
+    implicitWidth: player && !Player.idle ? 32 + eqW + textW + 14 + waveW : 0
     Behavior on implicitWidth { NumberAnimation { duration: 380; easing.type: Easing.OutQuint } }
 
     // a short dwell, so sweeping the pointer across the bar doesn't pop it open
@@ -80,6 +87,10 @@ Item {
             readonly property real frac: Player.frac
             readonly property vector2d textSpan: Qt.vector2d(box.x, box.x + Math.min(line.implicitWidth, box.width))
             readonly property vector2d track: Qt.vector2d(box.x, box.x + box.width)
+            readonly property real style: m.style
+            readonly property real time: Visualizer.t
+            readonly property real eqX: 27
+            readonly property vector2d wave: Qt.vector2d(box.x + box.width + 6, width - 12)
             readonly property vector4d sweeps: m.sweeps
             readonly property vector4d punches: Visualizer.beatPows
             readonly property real glow: 0.3 + 0.7 * m.live
@@ -96,7 +107,7 @@ Item {
             readonly property vector4d l6: Visualizer.l6
             readonly property vector4d l7: Visualizer.l7
             // Qt caches shaders by URL across reloads: bump ?v= after shaders/build.sh
-            fragmentShader: Qt.resolvedUrl("../shaders/pill.frag.qsb?v=12")
+            fragmentShader: Qt.resolvedUrl("../shaders/pill.frag.qsb?v=21")
         }
 
         // cover: a tinted glow behind it breathes with the bass
@@ -182,7 +193,7 @@ Item {
         // title • artist, edge-faded and scrolling when it doesn't fit
         Item {
             id: box
-            x: 30
+            x: 30 + m.eqW
             width: m.textW
             height: parent.height
             clip: true

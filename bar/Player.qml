@@ -45,6 +45,7 @@ Singleton {
     // The bar pill opens it on hover (show) and it closes once the pointer is on neither.
     property bool open: false
     property bool pillHovered: false
+    property bool pinned: false   // held open regardless of the pointer (Settings' Media page preview)
     property string screen: ""
     property real anchorX: 0
     // origin: the screen point (screen-local, logical px) the panel pours out of when it
@@ -56,6 +57,17 @@ Singleton {
         anchorX = x
         origin = from
         open = true
+    }
+    // each screen's media pill registers itself, so the panel can open under it (IPC, the
+    // settings preview) wherever the bar layout has put it
+    property var pills: ({})   // screen name -> pill item
+    function pillX(screenName) {
+        const p = pills[screenName]
+        return p && p.width > 0 ? p.mapToItem(null, p.width / 2, 0).x : -1
+    }
+    function showAtPill(s) {
+        const x = pillX(s.name) >= 0 ? pillX(s.name) : s.width / 2
+        show(s.name, x, Qt.point(x, 0))
     }
     function toggle(screenName, x) {
         if (open && screen === screenName) { open = false; return }

@@ -46,6 +46,16 @@ Singleton {
         waveReach: 2600,
         waveDur: 1.0,
 
+        // now playing pill backdrop: 0 columns, 1 ambient field, 2 mini EQ, 3 spectrum strip,
+        // 4 waveform tail (shaders/pill.frag `style`)
+        mediaStyle: 0,
+        // Now Playing panel layout: 0 turntable, 1 poster, 2 waveform, 3 LED matrix, 4 aurora
+        panelLayout: 0,
+        // turntable layout's ring (shaders/ring.frag `style`): 0 spokes, 1 aura, 2 liquid, 3 LED
+        panelStyle: 0,
+        // turntable layout's centrepiece: 0 vinyl, 1 cover card, 2 cover orb
+        panelCenter: 0,
+
         // panels (Now Playing, quick settings, hover cards)
         hoverDelay: 220,       // ms the pointer rests on a pill before its card pours out
         liquidSpeed: 1.0,      // pour/drain speed multiplier
@@ -85,6 +95,10 @@ Singleton {
     property bool   beatEffects:   defaults.beatEffects
     property real   waveReach:     defaults.waveReach
     property real   waveDur:       defaults.waveDur
+    property int    mediaStyle:    defaults.mediaStyle
+    property int    panelLayout:   defaults.panelLayout
+    property int    panelStyle:    defaults.panelStyle
+    property int    panelCenter:   defaults.panelCenter
     property int    hoverDelay:    defaults.hoverDelay
     property real   liquidSpeed:   defaults.liquidSpeed
     property bool   quickEdge:     defaults.quickEdge

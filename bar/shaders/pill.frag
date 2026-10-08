@@ -18,6 +18,10 @@ layout(std140, binding = 0) uniform buf {
     float frac;      // track progress 0..1
     vec2 textSpan;   // px: where the title/artist run, dimmed behind for contrast
     vec2 track;      // px: the progress line's ends (the text column, clear of the cover)
+    float style;     // Settings.mediaStyle: 0 columns, 1 ambient field, 2 mini EQ, 3 spectrum strip, 4 waveform tail
+    float time;      // s, Visualizer's frame clock (stops while paused)
+    float eqX;       // px: where the mini EQ starts (style 2)
+    vec2 wave;       // px: the waveform tail's span (style 4)
     vec4 sweeps;     // last four beats, newest in x: 0..1 since each (1 = spent)
     vec4 punches;    // their strengths, 0..1
     float glow;      // 0..1, overall strength (dims while paused)
@@ -43,7 +47,7 @@ float curve(float x) {
     float t = f - float(i);
     float a = lv(i - 1), b = lv(i), c = lv(i + 1), d = lv(i + 2);
     float v = b + 0.5 * t * (c - a + t * (2.0 * a - 5.0 * b + 4.0 * c - d + t * (3.0 * (b - c) + d - a)));
-    return pow(clamp(v, 0.0, 1.0), 0.8);   // <1 lifts mids and highs, which cava reports low
+    return pow(clamp(v, 0.0, 1.0), 0.6);   // <1 lifts mids and highs, which cava reports low (~0.1-0.15 typical)
 }
 
 float sdBox(vec2 p, vec2 b, float r) {
@@ -77,23 +81,104 @@ void main() {
 
     vec4 c = vec4(bg.rgb, 1.0) * bg.a;
 
-    // diffuse glow: taller and brighter where it's loud
-    float lc = curve(x);
-    float g = lc * exp(-y / (2.0 + lc * H * 0.6));
-    float ga = glow * ends * 0.45 * g;
-    c = over(vec4(mix(c2.rgb, c1.rgb, lc) * ga, ga), c);
+    float headX = mix(track.x, track.y, frac);
+    float kick = punches.x * pow(1.0 - sweeps.x, 2.0);   // the newest beat, easing off
+    if (style < 0.5) {
+        // diffuse glow: taller and brighter where it's loud
+        float lc = curve(x);
+        float g = lc * exp(-y / (2.0 + lc * H * 0.6));
+        float ga = glow * ends * 0.45 * g;
+        c = over(vec4(mix(c2.rgb, c1.rgb, lc) * ga, ga), c);
 
-    // frosted columns: soft-edged, soft-topped, brightening towards the tip
-    float ci = floor(px.x / pitch);
-    float lx = px.x - (ci + 0.5) * pitch;
-    float xc = ((ci + 0.5) * pitch - radius * 0.5) / (res.x - radius);
-    float lvl = curve(xc);
-    float top = 1.5 + lvl * H;
-    float col = smoothstep(pitch * 0.42, pitch * 0.12, abs(lx));
-    float rise = clamp(y / max(top, 1.0), 0.0, 1.0);
-    float body = step(y, top) * (0.45 + 0.55 * rise) + exp(-max(y - top, 0.0) / 2.0) * step(top, y);
-    float ca = glow * ends * col * body * (0.35 + 0.65 * lvl) * 0.7 * smoothstep(0.0, 0.08, xc) * smoothstep(1.0, 0.92, xc);
-    c = over(vec4(mix(c3.rgb, c1.rgb, rise) * ca, ca), c);
+        // frosted columns: soft-edged, soft-topped, brightening towards the tip
+        float ci = floor(px.x / pitch);
+        float lx = px.x - (ci + 0.5) * pitch;
+        float xc = ((ci + 0.5) * pitch - radius * 0.5) / (res.x - radius);
+        float lvl = curve(xc);
+        float top = 1.5 + lvl * H;
+        float col = smoothstep(pitch * 0.42, pitch * 0.12, abs(lx));
+        float rise = clamp(y / max(top, 1.0), 0.0, 1.0);
+        float body = step(y, top) * (0.45 + 0.55 * rise) + exp(-max(y - top, 0.0) / 2.0) * step(top, y);
+        float ca = glow * ends * col * body * (0.35 + 0.65 * lvl) * 0.7 * smoothstep(0.0, 0.08, xc) * smoothstep(1.0, 0.92, xc);
+        c = over(vec4(mix(c3.rgb, c1.rgb, rise) * ca, ca), c);
+    } else if (style < 1.5) {
+        // ambient field: five blobs of the palette drifting behind everything, each
+        // swelling with its part of the spectrum and flaring on the beat, under a slow sheen
+        for (int i = 0; i < 5; i++) {
+            float fi = float(i);
+            float bx = 0.1 + 0.2 * fi;
+            float lb = curve(bx);
+            vec2 bc = vec2(bx * res.x + sin(time * 0.35 + fi * 1.7) * res.x * 0.07,
+                           res.y * (0.5 + 0.35 * sin(time * 0.27 + fi * 2.3)));
+            vec2 dd = (px - bc) / vec2(res.x * (0.12 + 0.08 * lb), res.y * (0.55 + 0.45 * lb));
+            vec3 col = fi == 2.0 ? c1.rgb : mod(fi, 2.0) < 0.5 ? c2.rgb : c3.rgb;
+            float a2 = glow * exp(-dot(dd, dd)) * (0.2 + 0.55 * lb + 0.25 * kick);
+            c = over(vec4(col * a2, a2), c);
+        }
+        // a soft slanted band of light gliding across every ~7 s
+        float sx = fract(time * 0.14) * (res.x + 80.0) - 40.0;
+        float sh = exp(-pow((px.x - sx + (px.y - res.y * 0.5) * 0.6) / 14.0, 2.0)) * 0.09 * glow;
+        c = over(vec4(vec3(1.0) * sh, sh), c);
+    } else if (style < 2.5) {
+        // mini EQ: five capsules beside the cover, mirrored about the middle, bass .. treble,
+        // brightening towards their tips, each in a soft glow; they jump on the beat
+        for (int i = 0; i < 5; i++) {
+            float fi = float(i);
+            float lb = curve(0.5 - 0.1 * fi);
+            float bxc = eqX + 1.4 + fi * 3.6;
+            float r = 1.25;
+            float hh = r + 0.6 + lb * (7.5 + 1.5 * kick);
+            float yc = y - res.y * 0.5;
+            float dc = length(vec2(px.x - bxc, yc - clamp(yc, -hh + r, hh - r))) - r;
+            float tt = clamp(abs(yc) / max(hh, 1.0), 0.0, 1.0);
+            vec3 col = mix(mix(c3.rgb, c1.rgb, 0.4 + 0.6 * lb), vec3(1.0), 0.35 * tt * lb);
+            float g2 = exp(-max(dc, 0.0) / 2.2) * 0.35 * lb * glow;
+            c = over(vec4(c2.rgb * g2, g2), c);
+            float a2 = smoothstep(0.5, -0.5, dc) * (0.45 + 0.55 * glow);
+            c = over(vec4(col * a2, a2), c);
+        }
+    } else if (style < 3.5) {
+        // spectrum strip: the progress line made of fine bars; the played part rises from
+        // the palette's root colour to its accent over a glow, the rest stays a quiet grey
+        float pc = 2.6;
+        float cs = floor((px.x - track.x) / pc);
+        float cx = track.x + (cs + 0.5) * pc;
+        float ls = curve((cx - track.x) / max(track.y - track.x, 1.0));
+        float r = 0.75;
+        float top = 1.0 + r + ls * (6.0 + 1.5 * kick);
+        float dc = length(vec2(px.x - cx, y - clamp(y, 1.0 + r, top))) - r;
+        float inside = step(track.x, cx) * step(cx, track.y);
+        float pl = step(cx, headX);
+        float g2 = step(track.x, px.x) * step(px.x, headX) * 0.22 * glow * exp(-y / 4.0) * (0.4 + 0.6 * ls);
+        c = over(vec4(c2.rgb * g2, g2), c);
+        float rise = clamp((y - 1.0) / 7.0, 0.0, 1.0);
+        vec3 col = mix(vec3(0.75), mix(c3.rgb, c1.rgb, 0.3 + 0.7 * rise), pl);
+        float a2 = smoothstep(0.5, -0.5, dc) * inside * mix(0.2, 0.95 * (0.45 + 0.55 * glow), pl);
+        c = over(vec4(col * a2, a2), c);
+    } else {
+        // waveform tail: mirrored bars about a faint centre line in their own space after the
+        // text, fading in and out at the ends, whitening at the tips, glowing; they swell on
+        // the beat
+        float pc = 3.0;
+        float cw = floor((px.x - wave.x) / pc);
+        float cx = wave.x + (cw + 0.5) * pc;
+        float f = (cx - wave.x) / max(wave.y - wave.x, 1.0);
+        float lw = curve(f);
+        float r = 0.95;
+        float hh = r + 0.5 + lw * (res.y * 0.5 - 5.0) * (1.0 + 0.2 * kick);
+        float yc = y - res.y * 0.5;
+        float dc = length(vec2(px.x - cx, yc - clamp(yc, -hh + r, hh - r))) - r;
+        float inr = step(wave.x, cx - r) * step(cx + r, wave.y);
+        float edge = smoothstep(0.0, 0.18, f) * smoothstep(1.0, 0.82, f);
+        float line = exp(-yc * yc / 0.3) * 0.12 * edge * step(wave.x, px.x) * step(px.x, wave.y);
+        c = over(vec4(vec3(1.0) * line, line), c);
+        float g2 = 0.3 * lw * glow * exp(-max(dc, 0.0) / 3.0) * edge * inr;
+        c = over(vec4(c2.rgb * g2, g2), c);
+        float tt = clamp(abs(yc) / max(hh, 1.0), 0.0, 1.0);
+        vec3 col = mix(mix(c3.rgb, c1.rgb, 0.35 + 0.65 * lw), vec3(1.0), 0.3 * tt * lw);
+        float a2 = smoothstep(0.5, -0.5, dc) * inr * (0.4 + 0.6 * glow) * (0.55 + 0.45 * lw) * (0.35 + 0.65 * edge);
+        c = over(vec4(col * a2, a2), c);
+    }
 
     // scrim behind the text: a soft dark band over its run, so the letters stay readable
     // while the bars keep their full glow above, below and either side of it
@@ -107,8 +192,8 @@ void main() {
     c = over(vec4(vec3(hl), hl), c);
 
     // progress: hairline along the bottom, brighter where played, a glowing head
-    float headX = mix(track.x, track.y, frac);
-    float onLine = smoothstep(1.4, 0.6, y) * step(track.x, px.x) * step(px.x, track.y);
+    float strip = step(abs(style - 3.0), 0.5);   // style 3 draws its own line
+    float onLine = smoothstep(1.4, 0.6, y) * step(track.x, px.x) * step(px.x, track.y) * (1.0 - strip);
     float played = step(px.x, headX);
     float la = onLine * mix(0.08, 0.75, played);
     c = over(vec4(mix(vec3(1.0), c1.rgb, played) * la, la), c);

@@ -1,19 +1,17 @@
 import QtQuick
 import qs
 
-// Radial spectrum around a circle (shaders/ring.frag), live from Visualizer and coloured
-// from the cover art (Player palette). Size it at least 2 * (inner + amp) + a few px.
+// Straight spectrum (shaders/spectrum.frag) for the Now Playing panel's non-turntable
+// layouts, live from Visualizer and coloured from the cover art (Player palette).
+// style: 0 poster bars, 1 waveform, 2 matrix, 3 aurora.
 ShaderEffect {
-    property real inner: 40     // px: spokes grow out from this radius
-    property real amp: 20       // px: spoke length at full level
-    property real spokes: 64
-    property real thick: 0.5    // spoke width as a fraction of its slot
-    property real halo: 1       // glow / ghost line / bass halo strength
-    property real spin: 0       // turns
-    property real style: 0      // 0 spokes, 1 aura, 2 liquid, 3 LED
-    readonly property real time: Visualizer.t
+    property real style: 0
+    property real frac: 0       // track progress, for the waveform's played part
+    property real glow: 1       // 0..1: sinks while paused
+    property real kick: 0       // 0..1: the latest beat
 
     readonly property vector2d res: Qt.vector2d(width, height)
+    readonly property real time: Visualizer.t
     readonly property color c1: Player.c1
     readonly property color c2: Player.c2
     readonly property color c3: Player.c3
@@ -38,5 +36,5 @@ ShaderEffect {
     Component.onDestruction: Visualizer.peakUsers--
 
     // Qt caches shaders by URL across reloads: bump ?v= after shaders/build.sh
-    fragmentShader: Qt.resolvedUrl("../shaders/ring.frag.qsb?v=4")
+    fragmentShader: Qt.resolvedUrl("../shaders/spectrum.frag.qsb?v=3")
 }

@@ -15,8 +15,8 @@ import qs.components
 // (modules/Media.qml) or with `qs -c bar ipc call media toggle`. Pours out of the point
 // where the pointer rested, and on leaving vanishes from the point where the pointer
 // went out, a hole spreading from there (Player.origin, components/LiquidCard). A record
-// (components/Disc) turns inside a radial spectrum (components/Ring) and throws sparks
-// on the beat; it is all tinted from the cover art
+// (components/Disc), or another centrepiece (Settings.panelCenter), sits inside a radial
+// spectrum (components/Ring, styled by Settings.panelStyle) that throws sparks on the beat; it is all tinted from the cover art
 // (Player palette) over a blurred copy of it. Click the record to play/pause, scroll it
 // to scrub 5s. Closes once the pointer is on neither the pill nor the card.
 Scope {
@@ -25,7 +25,8 @@ Scope {
         function toggle(): void {
             const name = Hyprland.focusedMonitor?.name ?? Quickshell.screens[0].name
             const s = Quickshell.screens.find(s => s.name === name) ?? Quickshell.screens[0]
-            Player.toggle(s.name, s.width / 2)
+            const x = Player.pillX(s.name)
+            Player.toggle(s.name, x >= 0 ? x : s.width / 2)   // under the pill, or centred without one
         }
     }
 
@@ -62,7 +63,7 @@ Scope {
             }
             onPlayerChanged: if (!player) Player.open = false
 
-            Timer { id: closer; onTriggered: if (!hover.hovered && !Player.pillHovered) Player.open = false }
+            Timer { id: closer; onTriggered: if (!hover.hovered && !Player.pillHovered && !Player.pinned) Player.open = false }
             Connections {
                 target: Player
                 function onPillHoveredChanged() {
@@ -190,8 +191,11 @@ Scope {
 
                 Item {
                     id: stage
+                    // Settings.panelLayout: 0 turntable (record in a radial spectrum), 1 poster,
+                    // 2 waveform, 3 LED matrix, 4 aurora; each sets its own height
+                    readonly property int layout: Settings.panelLayout
                     width: 340
-                    height: 340
+                    height: [340, 330, 150, 210, 200][layout] ?? 340
                     anchors.horizontalCenter: parent.horizontalCenter
                     y: 12
 
@@ -199,7 +203,7 @@ Scope {
                     Loader {
                         id: live
                         anchors.fill: parent
-                        active: win.visible
+                        active: win.visible && stage.layout === 0
                         sourceComponent: Item {
                             property alias sparks: sparks
                             // bass bloom behind the record
@@ -242,6 +246,7 @@ Scope {
 
                             Ring {
                                 anchors.fill: parent
+                                style: Settings.panelStyle
                                 inner: 116
                                 amp: 50
                                 spokes: 120
@@ -252,20 +257,215 @@ Scope {
                         }
                     }
 
-                    Disc {
-                        spinning: win.visible
+                    // the centrepiece (Settings.panelCenter): a record, the cover as a card, or
+                    // the cover as a round orb.
+                    // Each stays inside the ring's inner radius (116).
+                    Loader {
                         anchors.centerIn: parent
-                        width: 200
-                        height: 200
-                        scale: 1 + card.kick * 0.035
+                        active: stage.layout === 0
+                        sourceComponent: [vinyl, coverCard, coverOrb][Settings.panelCenter] ?? vinyl
                     }
+                    // the other layouts: the whole stage is theirs
+                    Loader {
+                        anchors.fill: parent
+                        active: win.visible && stage.layout > 0
+                        sourceComponent: [null, poster, waveform, matrix, aurora][stage.layout] ?? null
+                    }
+                    Component {
+                        id: poster
+                        // the cover big and edge to edge, the spectrum rising over its foot
+                        Item {
+                            Item {
+                                width: 300
+                                height: 300
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                y: 22   // clear of the header row
+                                scale: 1 + card.kick * 0.015
+                                layer.enabled: true
+                                layer.effect: MultiEffect {
+                                    shadowEnabled: true
+                                    shadowColor: Qt.alpha(Player.c2, 0.7)
+                                    shadowBlur: 1
+                                    blurMax: 40
+                                    shadowVerticalOffset: 8
+                                    saturation: -0.8 * (1 - card.live)
+                                }
+                                ClippingRectangle {
+                                    anchors.fill: parent
+                                    radius: 18
+                                    color: Qt.alpha(Player.c2, 0.35)
+                                    Text {
+                                        anchors.centerIn: parent
+                                        visible: !posterArt.ready
+                                        text: Theme.g(0xF075A)
+                                        color: Player.c1
+                                        font { family: Theme.font; pixelSize: 110 }
+                                    }
+                                    Art { id: posterArt; anchors.fill: parent; sourceSize: Qt.size(600, 600) }
+                                    Rectangle {   // the foot darkens so the bars read over any cover
+                                        anchors.bottom: parent.bottom
+                                        width: parent.width
+                                        height: 140
+                                        gradient: Gradient {
+                                            GradientStop { position: 0; color: "transparent" }
+                                            GradientStop { position: 1; color: Qt.alpha("black", 0.75) }
+                                        }
+                                    }
+                                    Spectrum {
+                                        anchors.bottom: parent.bottom
+                                        width: parent.width
+                                        height: 120
+                                        style: 0
+                                        glow: card.live
+                                        kick: card.kick
+                                    }
+                                }
+                                Rectangle {
+                                    anchors.fill: parent
+                                    radius: 18
+                                    color: "transparent"
+                                    border.color: Qt.alpha("white", 0.12)
+                                }
+                            }
+                        }
+                    }
+                    Component {
+                        id: waveform
+                        // no art: a wide waveform, played part lit; click it to seek
+                        Item {
+                            Spectrum {
+                                anchors.centerIn: parent
+                                width: parent.width
+                                height: 130
+                                style: 1
+                                frac: card.frac
+                                glow: card.live
+                                kick: card.kick
+                            }
+                        }
+                    }
+                    Component {
+                        id: matrix
+                        Item {
+                            Spectrum {
+                                anchors.fill: parent
+                                anchors.margins: 8
+                                style: 2
+                                glow: card.live
+                                kick: card.kick
+                            }
+                        }
+                    }
+                    Component {
+                        id: aurora
+                        Spectrum {
+                            style: 3
+                            glow: card.live
+                            kick: card.kick
+                        }
+                    }
+                    Component {
+                        id: vinyl
+                        Disc {
+                            spinning: win.visible
+                            width: 200
+                            height: 200
+                            scale: 1 + card.kick * 0.035
+                        }
+                    }
+                    Component {
+                        id: coverCard
+                        Item {
+                            width: 160
+                            height: 160
+                            scale: 1 + card.kick * 0.03
+                            layer.enabled: true
+                            layer.effect: MultiEffect {
+                                shadowEnabled: true
+                                shadowColor: Qt.alpha(Player.c2, 0.8)
+                                shadowBlur: 1
+                                blurMax: 32
+                                shadowVerticalOffset: 6
+                                saturation: -0.8 * (1 - card.live)
+                            }
+                            ClippingRectangle {
+                                anchors.fill: parent
+                                radius: 16
+                                color: Qt.alpha(Player.c2, 0.35)
+                                Text {
+                                    anchors.centerIn: parent
+                                    visible: !cardArt.ready
+                                    text: Theme.g(0xF075A)
+                                    color: Player.c1
+                                    font { family: Theme.font; pixelSize: 64 }
+                                }
+                                Art { id: cardArt; anchors.fill: parent; sourceSize: Qt.size(320, 320) }
+                                Rectangle {   // glass sheen across the top
+                                    anchors.fill: parent
+                                    gradient: Gradient {
+                                        GradientStop { position: 0; color: Qt.alpha("white", 0.14) }
+                                        GradientStop { position: 0.45; color: "transparent" }
+                                    }
+                                }
+                            }
+                            Rectangle {
+                                anchors.fill: parent
+                                radius: 16
+                                color: "transparent"
+                                border.color: Qt.alpha("white", 0.14)
+                            }
+                        }
+                    }
+                    Component {
+                        id: coverOrb
+                        Item {
+                            width: 208
+                            height: 208
+                            scale: 1 + Visualizer.bass * 0.025 * card.live + card.kick * 0.025
+                            layer.enabled: true
+                            layer.effect: MultiEffect { saturation: -0.8 * (1 - card.live) }
+                            ClippingRectangle {
+                                anchors.fill: parent
+                                radius: width / 2
+                                color: Qt.alpha(Player.c2, 0.35)
+                                Text {
+                                    anchors.centerIn: parent
+                                    visible: !orbArt.ready
+                                    text: Theme.g(0xF075A)
+                                    color: Player.c1
+                                    font { family: Theme.font; pixelSize: 80 }
+                                }
+                                Art { id: orbArt; anchors.fill: parent; sourceSize: Qt.size(416, 416) }
+                                Rectangle {   // light from above, darker towards the bottom: a sphere, not a sticker
+                                    anchors.fill: parent
+                                    gradient: Gradient {
+                                        GradientStop { position: 0; color: Qt.alpha("white", 0.16) }
+                                        GradientStop { position: 0.4; color: "transparent" }
+                                        GradientStop { position: 1; color: Qt.alpha("black", 0.3) }
+                                    }
+                                }
+                            }
+                            Rectangle {   // glass rim
+                                anchors.fill: parent
+                                radius: width / 2
+                                color: "transparent"
+                                border.width: 1.5
+                                border.color: Qt.alpha(Player.c1, 0.35)
+                            }
+                        }
+                    }
+                    // click: play/pause (on the waveform: seek there); scroll: scrub 5s
                     MouseArea {
                         anchors.centerIn: parent
-                        width: 200
-                        height: 200
+                        width: stage.layout === 0 ? 200 : stage.width
+                        height: stage.layout === 0 ? 200 : stage.height
                         cursorShape: Qt.PointingHandCursor
                         property real wheelAcc: 0
-                        onClicked: win.player?.togglePlaying()
+                        onClicked: e => {
+                            if (stage.layout === 2 && win.player?.canSeek && card.len > 0)
+                                win.player.position = Math.max(0, Math.min(1, e.x / width)) * card.len
+                            else win.player?.togglePlaying()
+                        }
                         onWheel: e => {
                             wheelAcc += e.angleDelta.y
                             if (Math.abs(wheelAcc) < 120 || !win.player?.canSeek) return
@@ -277,7 +477,7 @@ Scope {
 
                 ColumnLayout {
                     id: info
-                    anchors { left: parent.left; right: parent.right; top: stage.bottom; topMargin: -18; leftMargin: 24; rightMargin: 24 }
+                    anchors { left: parent.left; right: parent.right; top: stage.bottom; topMargin: stage.layout === 0 ? -18 : 10; leftMargin: 24; rightMargin: 24 }
                     spacing: 3
 
                     Swap {

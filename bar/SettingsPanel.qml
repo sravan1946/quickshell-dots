@@ -1,21 +1,32 @@
 import QtQuick
 import QtQuick.Layouts
 import Quickshell
-import Quickshell.Wayland
+import Quickshell.Io
 import Quickshell.Hyprland
 import qs
 import qs.components
 
-// Central settings GUI, opened by Config.openSettings() (the quick-settings tile) on the
-// focused monitor. A centred liquid card (components/LiquidCard) with a category sidebar
-// and the chosen page of editors. Every control is two-way bound to Settings.* (which
-// debounce-persists) or to live Config state, so an external change or a reset() shows up
-// at once. Close via the X, Escape or a click outside the card.
+// Central settings GUI, opened by Config.openSettings() (the quick-settings tile) or IPC.
+// A normal floating window ("Bar Settings", floated by a rule in hyprland.lua): move it
+// with SUPER+drag or by dragging the sidebar header, close it with the X, Escape or the
+// compositor. A category sidebar and the chosen page of editors. Every control is two-way
+// bound to Settings.* (which debounce-persists) or to live Config state, so an external
+// change or a reset() shows up at once.
 Scope {
     id: root
 
     property bool open: false
     property int page: 0
+    // on the Media page the Now Playing panel is held open under the pill on the focused
+    // monitor: every style choice shows live on the real pill and panel
+    readonly property bool previewing: open && pages[page].title === "Media"
+    onPreviewingChanged: {
+        Player.pinned = previewing
+        if (previewing) {
+            const s = Quickshell.screens.find(s => s.name === Hyprland.focusedMonitor?.name) ?? Quickshell.screens[0]
+            Player.showAtPill(s)
+        } else Player.open = false
+    }
 
     readonly property var pages: [
         { title: "Bar",           icon: 0xF0570 },   // dock-top
@@ -31,44 +42,37 @@ Scope {
     // reflect open state so other surfaces (e.g. the OSD) can stay quiet, mirroring Config.quickOpen
     onOpenChanged: {
         Config.settingsOpen = open
-        const p = Qt.point(card.x + card.width / 2, card.y - 12)   // pours down from above its top edge
-        if (open) card.pour(p); else card.drain(p)
+        card.progress = open ? 1 : 0   // a normal window: no pour, the compositor animates it
     }
 
-    // open on the focused monitor (mirrors QuickSettings)
+    // `qs -c bar ipc call settings toggle`, or `... page media` to open on a page
+    IpcHandler {
+        target: "settings"
+        function toggle(): void { Config.openSettings() }
+        // `... set mediaStyle 2`: any Settings key, value as JSON (saved like a GUI change)
+        function set(key: string, value: string): void {
+            if (Settings.defaults[key] !== undefined) Settings[key] = JSON.parse(value)
+        }
+        function page(name: string): void {
+            root.page = Math.max(0, root.pages.findIndex(p => p.title.toLowerCase() === name.toLowerCase()))
+            if (!root.open) Config.openSettings()
+        }
+    }
+
     Connections {
         target: Config
-        function onOpenSettings() {
-            const focused = Hyprland.focusedMonitor?.name ?? Quickshell.screens[0].name
-            if (focused === win.screen?.name) root.open = !root.open
-        }
+        function onOpenSettings() { root.open = !root.open }
     }
 
-    PanelWindow {
+    FloatingWindow {
         id: win
-        // follow the focused monitor each time it opens
-        screen: Quickshell.screens.find(s => s.name === Hyprland.focusedMonitor?.name) ?? Quickshell.screens[0]
-        visible: card.progress > 0 || dim.opacity > 0
-        anchors { top: true; bottom: true; left: true; right: true }
-        exclusionMode: ExclusionMode.Ignore
+        title: "Bar Settings"
+        visible: root.open
+        implicitWidth: 620
+        implicitHeight: 540
+        minimumSize: Qt.size(620, 480)   // the pages are laid out for 620 wide
         color: "transparent"
-        // click-through while closed; while open the whole surface is a click-outside catcher
-        mask: root.open ? full : empty
-        Region { id: empty }
-        Region { id: full; width: win.width; height: win.height }
-        WlrLayershell.layer: WlrLayer.Overlay
-        WlrLayershell.namespace: "settings"
-        WlrLayershell.keyboardFocus: root.open ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
-
-        // dim + click-outside-to-close
-        Rectangle {
-            id: dim
-            anchors.fill: parent
-            color: "black"
-            opacity: root.open ? 0.35 : 0
-            Behavior on opacity { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
-            MouseArea { anchors.fill: parent; onClicked: root.open = false }
-        }
+        onClosed: root.open = false   // closed by the compositor (killactive)
 
         Item {
             anchors.fill: parent
@@ -78,17 +82,12 @@ Scope {
 
         LiquidCard {
             id: card
-            x: Math.round((win.width - width) / 2)
-            y: Math.round((win.height - height) / 2)
-            width: 620
-            height: Math.min(win.height - 80, 540)
+            anchors.fill: parent
             radius: Theme.radius + 5
             color: Qt.alpha(Theme.mainBg, 0.98)
             border.color: Qt.alpha(Theme.mainFg, 0.35)
             border.width: 1
 
-            // swallow clicks so they don't reach the click-outside catcher
-            MouseArea { anchors.fill: parent }
 
             // ---- sidebar ----
             Rectangle {
@@ -96,6 +95,15 @@ Scope {
                 width: 168
                 height: parent.height
                 color: Qt.alpha(Theme.mainFg, 0.04)
+
+                // the header ("Settings") is the title bar: drag it to move the window
+                MouseArea {
+                    z: 1
+                    width: parent.width
+                    height: 50
+                    cursorShape: Qt.SizeAllCursor
+                    onPressed: win.startSystemMove()
+                }
 
                 Column {
                     x: 12
@@ -331,6 +339,33 @@ Scope {
         id: mediaPage
         ColumnLayout {
             spacing: 12
+            Hint { visible: !Player.player; text: "Play something to preview these live on the pill and the panel." }
+            SectionHeader { text: "Now playing pill" }
+            Hint { text: "What the pill draws from the music behind or beside the title." }
+            StyleChoice {
+                names: ["Columns", "Ambient", "Mini EQ", "Strip", "Waveform"]
+                value: Settings.mediaStyle
+                onPicked: i => Settings.mediaStyle = i
+            }
+            SectionHeader { text: "Now playing panel" }
+            StyleChoice {
+                names: ["Turntable", "Poster", "Waveform", "Matrix", "Aurora"]
+                value: Settings.panelLayout
+                onPicked: i => Settings.panelLayout = i
+            }
+            Hint { visible: Settings.panelLayout === 0; text: "Turntable: what sits in the middle, and the spectrum around it." }
+            StyleChoice {
+                visible: Settings.panelLayout === 0
+                names: ["Vinyl", "Cover", "Orb"]
+                value: Settings.panelCenter
+                onPicked: i => Settings.panelCenter = i
+            }
+            StyleChoice {
+                visible: Settings.panelLayout === 0
+                names: ["Spokes", "Aura", "Liquid", "LED"]
+                value: Settings.panelStyle
+                onPicked: i => Settings.panelStyle = i
+            }
             SectionHeader { text: "Beat effects" }
             SettingToggle {
                 label: "React to the beat"
