@@ -1,12 +1,12 @@
 import QtQuick
-import QtQuick.Effects
 import Quickshell
+import Quickshell.Hyprland
 import qs
 
-// Themed click popup under `target` (detail panels, menus): a soft-bordered card
-// with a shadow that eases open from the module and closes quicker than it opens.
-// closeOnOutsideClick: xdg popup grab, dismissed by any click outside (that path
-// closes instantly: the compositor unmaps it). The card sits shadowPad inside the
+// Themed click popup under `target` (detail panels, menus): the liquid card every other
+// panel uses (components/LiquidCard), poured out under the module and drained back into it.
+// closeOnOutsideClick: closes on a click outside it and the bar (HyprlandFocusGrab), and when
+// another popup opens or the bar's empty space is clicked (Tip). The card sits shadowPad inside the
 // window to leave the shadow room; input only lands on the card.
 PopupWindow {
     id: pop
@@ -18,7 +18,7 @@ PopupWindow {
     property bool closeOnOutsideClick: false
     default property alias content: body.data
     readonly property alias hovered: cardHover.hovered   // pointer over the card
-    readonly property real shadowPad: 16
+    readonly property real shadowPad: 28   // LiquidCard's shadow: blur 32, 5 down
 
     anchor.item: target
     anchor.rect: Qt.rect(0, 0, target?.width ?? 0, (target?.height ?? 0) + 6 - shadowPad)
@@ -27,18 +27,37 @@ PopupWindow {
     color: "transparent"
     implicitWidth: body.childrenRect.width + 2 * padX + 2 * shadowPad
     implicitHeight: body.childrenRect.height + 2 * padY + 2 * shadowPad
-    // Region only re-reads x/y/size, not scale/transform: masking the animated card froze
-    // its hit area at the shrunken opening frame and left the bottom rows (Quit) dead.
+    // input only on the card's area, not the shadow room around it
     mask: Region { item: hit }
 
-    grabFocus: closeOnOutsideClick
+    // Not an xdg popup grab (grabFocus): when one of those ended, Hyprland left pointer focus
+    // nowhere until the pointer moved, so the next click in the same spot did nothing. This
+    // one lets the popup and the bar take input normally: a click on the module goes to the
+    // module (toggle), anywhere else clears the grab and closes us.
+    HyprlandFocusGrab {
+        id: grab
+        windows: [pop, pop.target?.QsWindow.window ?? pop]
+        onCleared: pop.close()
+    }
+    Connections {
+        target: Tip
+        function onPopupOpened(p) { if (p !== pop) pop.close() }
+        function onBarPressed(m) { if (m !== pop.target) pop.close() }
+    }
 
     // Clicking the module that opened us first dismisses the grab (closing us),
     // then toggles; don't reopen in that case.
     property real closedAt: 0
+    property bool leaving: false
+    readonly property bool opened: card.progress >= 1   // fully poured: content can start changing size
+    // pours out of / drains into the top middle of the card, under the module that opened it
+    readonly property point spout: Qt.point(card.x + card.width / 2, card.y)
     onVisibleChanged: {
-        if (visible) { Tip.hide(); Tip.popups++; shut.stop(); settleWait.restart(); settle() }
-        else { Tip.popups--; closedAt = Date.now(); wrap.progress = 0; settleWait.stop() }
+        if (visible) {
+            Tip.hide(); Tip.popups++; leaving = false; settleWait.restart(); settle()
+            Tip.popupOpened(pop)
+            grab.active = closeOnOutsideClick
+        } else { Tip.popups--; closedAt = Date.now(); leaving = false; card.reset(); settleWait.stop(); grab.active = false }
     }
     // A fresh popup maps at the wrong scale: on the 1.5x screen its dpr goes 2 -> 1 -> 1.5
     // over ~100ms, and those frames draw the card zoomed (a flicker). Stay invisible until
@@ -46,59 +65,42 @@ PopupWindow {
     onDevicePixelRatioChanged: settle()
     function settle() { if (settleWait.running && devicePixelRatio === target?.QsWindow.window?.devicePixelRatio) appear() }
     Timer { id: settleWait; interval: 250; onTriggered: pop.appear() }
-    function appear() { settleWait.stop(); grow.restart() }
+    function appear() { settleWait.stop(); card.pour(spout) }
     Component.onDestruction: if (visible) Tip.popups--
     function toggle() {
-        if (visible) close()
+        if (visible && !leaving) close()
+        else if (visible) { leaving = false; card.pour(spout) }   // reopened mid-drain
         else if (Date.now() - closedAt > 250) visible = true
     }
-    function close() { if (visible && !shut.running) { settleWait.stop(); shut.restart() } }
-
-    NumberAnimation { id: grow; target: wrap; property: "progress"; from: 0; to: 1; duration: 250; easing.type: Easing.OutCubic }
-    SequentialAnimation {
-        id: shut
-        // OutCubic, not InCubic: with opacity at 1.8x progress, InCubic held the card
-        // fully opaque for ~100ms and then popped it out
-        NumberAnimation { target: wrap; property: "progress"; to: 0; duration: 150; easing.type: Easing.OutCubic }
-        ScriptAction { script: pop.visible = false }
-    }
+    function close() { if (visible && !leaving) { leaving = true; settleWait.stop(); grab.active = false; card.drain(spout) } }
 
     Item { id: hit; anchors.fill: parent; anchors.margins: pop.shadowPad }
 
-    Item {
-        id: wrap
-        property real progress: 0
-        anchors.fill: parent
-        anchors.margins: pop.shadowPad
-        opacity: Math.min(1, progress * 1.8)
-        scale: 0.94 + 0.06 * progress
-        transformOrigin: Item.Top
-        transform: Translate { y: (1 - wrap.progress) * -10 }
-        // on the card's ancestor, so hovering anything inside it counts
+    // the liquid card the other panels use (components/LiquidCard): poured out on open,
+    // drained on close; its shadow sits in the shadowPad around it
+    LiquidCard {
+        id: card
+        x: pop.shadowPad
+        y: pop.shadowPad
+        width: parent.width - 2 * pop.shadowPad
+        height: parent.height - 2 * pop.shadowPad
+        radius: Theme.radius
+        color: Qt.alpha(Theme.mainBg, pop.bgAlpha)
+        border.color: Qt.alpha(Theme.mainFg, 0.35)
+        border.width: 1
+        // quick, and still moving at the end (end slope ~0.6): the tall panels don't crawl
+        formCurve: [0.25, 0.6, 0.6, 0.76, 1, 1]
+        formTime: 450
+        onClosed: if (pop.leaving) pop.visible = false
+        // on the card itself, so hovering anything inside it counts
         HoverHandler { id: cardHover }
 
-        Rectangle {
-            anchors.fill: parent
-            radius: Theme.radius
-            color: Theme.mainBg
-            layer.enabled: true
-            layer.effect: MultiEffect { shadowEnabled: true; shadowColor: "black"; shadowOpacity: 0.5; shadowBlur: 1; shadowVerticalOffset: 4; blurMax: 24 }
-        }
-        Rectangle {
-            id: card
-            anchors.fill: parent
-            radius: Theme.radius
-            color: Qt.alpha(Theme.mainBg, pop.bgAlpha)
-            border.color: Qt.alpha(Theme.mainFg, 0.35)
-            border.width: 1
-
-            Item {
-                id: body
-                x: pop.padX
-                y: pop.padY
-                width: childrenRect.width
-                height: childrenRect.height
-            }
+        Item {
+            id: body
+            x: pop.padX
+            y: pop.padY
+            width: childrenRect.width
+            height: childrenRect.height
         }
     }
 }

@@ -13,6 +13,11 @@ ClippingRectangle {
 
     property real progress: 0
     property color glow: Theme.actBg
+    // the pour: OutQuart over 700ms by default. Its long tail is invisible on a small card,
+    // but on a tall one the far corners crawl in at the end, so Dropdown passes a bezier
+    // (x1, y1, x2, y2, 1, 1) that still has speed at the finish, and a shorter time
+    property var formCurve: []
+    property real formTime: 700
     signal closed()                  // fully drained
 
     property real seed: 0
@@ -32,6 +37,8 @@ ClippingRectangle {
         form.stop()
         burn.restart()
     }
+    // gone at once, no animation (a popup the compositor already unmapped)
+    function reset() { form.stop(); burn.stop(); closing = false; progress = 0 }
 
     visible: progress > 0
     layer.enabled: progress < 1
@@ -43,7 +50,15 @@ ClippingRectangle {
         hole: card.closing ? 1 : 0
     }
 
-    NumberAnimation { id: form; target: card; property: "progress"; to: 1; duration: 700 / Settings.liquidSpeed; easing.type: Easing.OutQuart }
+    NumberAnimation {
+        id: form
+        target: card
+        property: "progress"
+        to: 1
+        duration: card.formTime / Settings.liquidSpeed
+        easing.type: card.formCurve.length ? Easing.BezierSpline : Easing.OutQuart
+        easing.bezierCurve: card.formCurve
+    }
     // closing: fast, then settling
     NumberAnimation { id: burn; target: card; property: "progress"; to: 0; duration: 420 / Settings.liquidSpeed; easing.type: Easing.OutCubic; onFinished: card.closed() }
 

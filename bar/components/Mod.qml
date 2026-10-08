@@ -21,7 +21,9 @@ Item {
     property int minChars: 0           // waybar min-length
     property real extraPad: 0          // GTK label buttons (workspaces) render ~4.5px wider per side
     property bool growIn: false        // grow in when created or shown; rows turn it on after startup so a reload stays still
-    readonly property bool hovered: mouse.containsMouse
+    // from a HoverHandler, not mouse.containsMouse: after a click that MouseArea missed the
+    // pointer leaving the bar and stayed "hovered" (the hover card's HoverHandler saw it go)
+    readonly property bool hovered: hover.hovered
     readonly property string screenName: QsWindow.window?.screen?.name ?? ""   // which bar's tooltip shows it
 
     signal clicked(int button)
@@ -87,7 +89,8 @@ Item {
         anchors { fill: parent; topMargin: -Config.pillInset; bottomMargin: -Config.pillInset }
         hoverEnabled: true
         acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
-        onPressed: Tip.hide()
+        onPressed: { Tip.hide(); Tip.barPressed(m) }
+        HoverHandler { id: hover }
         onClicked: e => m.clicked(e.button)
         // Touchpads send many small deltas; accumulate to whole notches (120).
         onWheel: e => {

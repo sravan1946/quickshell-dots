@@ -8,7 +8,6 @@ import Quickshell.Hyprland
 import Quickshell.Widgets
 import Quickshell.Bluetooth
 import Quickshell.Services.Pipewire
-import Quickshell.Services.Mpris
 import Quickshell.Services.UPower
 import qs
 import qs.components
@@ -37,7 +36,7 @@ Scope {
     readonly property var src: Pipewire.defaultAudioSource
     readonly property var bt: Bluetooth.defaultAdapter
     readonly property var btOn: Bluetooth.devices.values.filter(d => d.connected)
-    readonly property var player: Mpris.players.values.find(p => p.isPlaying) ?? Mpris.players.values[0] ?? null
+    readonly property var player: Player.player
     readonly property var bat: UPower.displayDevice
     readonly property int batPct: Math.round(bat.percentage <= 1 ? bat.percentage * 100 : bat.percentage)
 
@@ -51,9 +50,9 @@ Scope {
     property bool ppAvailable: false
     readonly property var ppOrder: ["power-saver", "balanced", "performance"]
     function ppIcon(p) {
-        return p === "power-saver" ? 0xF0335          // leaf
-            : p === "performance" ? 0xF0E31           // rocket-launch
-            : 0xF140B                                 // scale-balance (balanced)
+        return p === "power-saver" ? 0xF032A          // leaf
+            : p === "performance" ? 0xF14DE           // rocket-launch
+            : 0xF05D1                                 // scale-balance (balanced)
     }
     function ppRefresh() { ppGet.running = true }
     function ppCycle() {

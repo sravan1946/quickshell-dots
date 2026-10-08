@@ -25,6 +25,11 @@ Singleton {
         if (pending === m) { pending = null; wait.stop() }
         if (target === m) grace.restart()   // short grace: the gap between two modules isn't a leave
     }
+    // click popups (components/Dropdown): opening one closes the others, and a press on the
+    // bar closes those that belong to another module (Mod), or all of them on empty space (Bar)
+    signal popupOpened(var popup)
+    signal barPressed(var module)   // null: the bar's empty space
+
     // clicks and popups: the bubble goes at once instead of fading over the popup
     signal dismissed()
     function hide() { wait.stop(); grace.stop(); target = null; pending = null; dismissed() }

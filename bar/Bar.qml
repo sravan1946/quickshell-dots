@@ -34,6 +34,15 @@ PanelWindow {
         fragmentShader: Qt.resolvedUrl("shaders/bar.frag.qsb?v=4")
     }
 
+    // a click on the bar's empty space closes any open click popup (a module's own click
+    // never reaches this: its MouseArea is on top)
+    MouseArea {
+        anchors.fill: parent
+        z: -1
+        acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
+        onPressed: Tip.barPressed(null)
+    }
+
     // HyDE margins: .modules-left 0, .modules-right 0.2em margin + 0.2em padding
     Section { groups: Config.left; anchors.left: parent.left }
     Section { groups: Config.center; anchors.horizontalCenter: parent.horizontalCenter }

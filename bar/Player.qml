@@ -11,12 +11,15 @@ import qs
 Singleton {
     id: pl
 
-    readonly property var auto: Mpris.players.values.find(p => p.isPlaying) ?? Mpris.players.values[0] ?? null
+    // the players worth showing: a browser keeps its MPRIS entry after a tab's media ends
+    // (stopped, no title), and that empty one mustn't stand in for a real player
+    readonly property var players: Mpris.players.values.filter(p => p.playbackState !== MprisPlaybackState.Stopped || p.trackTitle !== "")
+    readonly property var auto: players.find(p => p.isPlaying) ?? players[0] ?? null
     // a pick holds until that player goes away or another one becomes the playing one
     // ponytail: only sees a start that changes `auto` (first playing in list order); track per-player starts if that bites
     property var picked: null
     onAutoChanged: if (auto?.isPlaying && auto !== picked) picked = null
-    readonly property var player: (picked && Mpris.players.values.includes(picked) ? picked : null) ?? auto
+    readonly property var player: (picked && players.includes(picked) ? picked : null) ?? auto
     readonly property bool playing: !!player?.isPlaying
     // paused for 10 minutes: the pill folds away until it plays again
     property bool idle: false

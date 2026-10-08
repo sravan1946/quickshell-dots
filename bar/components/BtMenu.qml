@@ -112,7 +112,8 @@ Dropdown {
             BtList {
                 id: devices
                 width: parent.width
-                active: menu.visible && menu.on
+                // discovery adds rows: start it once the pour is done, not mid-animation
+                active: menu.opened && menu.on
                 hideConnected: true
                 limit: 99
             }

@@ -6,7 +6,6 @@ import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
 import Quickshell.Hyprland
-import Quickshell.Services.Mpris
 import Quickshell.Widgets
 import qs
 import qs.components
@@ -151,7 +150,7 @@ Scope {
                 // the pill and this panel follow; the album faded on the right
                 Row {
                     id: players
-                    readonly property var list: Mpris.players.values
+                    readonly property var list: Player.players
                     x: 12
                     y: 9
                     spacing: 4

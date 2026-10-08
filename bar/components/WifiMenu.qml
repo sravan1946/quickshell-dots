@@ -46,9 +46,11 @@ Dropdown {
     closeOnOutsideClick: true
     padX: 12
     padY: 12
+    // starting processes stalls the UI thread for a moment, so the refresh, the hotspot check
+    // and the scan wait until the pour is done (the last results show meanwhile)
+    onOpenedChanged: if (opened) { refresh(); spotCan.running = true }
     onVisibleChanged: {
-        if (visible) { refresh(); spotCan.running = true }
-        else { section = "wifi"; spotReveal = false; spotNote = false; details = false; showAll = false; hiddenOpen = false; password = ""; armed = "" }
+        if (!visible) { section = "wifi"; spotReveal = false; spotNote = false; details = false; showAll = false; hiddenOpen = false; password = ""; armed = "" }
     }
 
     onHotspotChanged: { spot = {}; spotQr = ""; spotReveal = false; if (hotspot) spotRead.running = true }
@@ -65,7 +67,7 @@ Dropdown {
         vpns = vpns.map(o => o.name === v.name ? Object.assign({}, o, { state: v.state === "" ? "activating" : "deactivating" }) : o)
     }
 
-    Timer { interval: 2000; running: menu.visible; repeat: true; onTriggered: menu.refresh() }
+    Timer { interval: 2000; running: menu.opened; repeat: true; onTriggered: menu.refresh() }
     Timer { id: soon; interval: 900; onTriggered: { menu.refresh(); networks.scan(); spotCan.running = true } }
     Timer { id: spotNoteHide; interval: 5000; onTriggered: menu.spotNote = false }
     Timer { id: disarm; interval: 3000; onTriggered: menu.armed = "" }
@@ -423,7 +425,7 @@ Dropdown {
                         WifiList {
                             id: networks
                             width: parent.width
-                            active: menu.visible
+                            active: menu.opened
                             hideInUse: true
                             limit: menu.showAll ? 99 : 4
                         }
