@@ -1,7 +1,6 @@
 import QtQuick
 import QtQuick.Effects
 import Quickshell
-import Quickshell.Widgets
 import qs
 import qs.components
 
@@ -18,15 +17,23 @@ Item {
     readonly property string screenName: QsWindow.window?.screen?.name ?? ""
     readonly property string title: player?.trackTitle || player?.identity || ""
     // beat response, run on Visualizer's frame clock (no animation timers): each of the
-    // last four beats' rim lights goes 0 -> 1 over 650 ms (`sweeps`), `kick` is a quick
-    // 0..1 punch for the cover from the newest one. The bar's beat wave leaves from here too.
-    readonly property real since: Visualizer.t - Visualizer.beatAt
+    // last four beats' rim lights goes 0 -> 1 over 650 ms (`sweeps`), `kick` is a 0..1 punch
+    // for the cover. The bar's beat wave leaves from here too.
     readonly property vector4d sweeps: {
         const a = Visualizer.beatAts, t = Visualizer.t
         const f = at => Math.min(1, Math.max(0, (t - at) / 0.65))
         return Qt.vector4d(f(a.x), f(a.y), f(a.z), f(a.w))
     }
-    readonly property real kick: Visualizer.beatStrength * Math.pow(Math.max(0, 1 - since / 0.34), 2)
+    // a 60 ms rise (two frames at 30 fps, not a one-frame pop) and a 400 ms ease back; the
+    // strongest of the last four beats wins, so a weaker one landing mid-decay can't snap it down
+    readonly property real kick: {
+        const a = Visualizer.beatAts, p = Visualizer.beatPows, t = Visualizer.t
+        const f = (at, s) => {
+            const d = t - at
+            return s * (d < 0.06 ? Math.max(0, d) / 0.06 : Math.pow(Math.max(0, 1 - (d - 0.06) / 0.4), 2))
+        }
+        return Math.max(f(a.x, p.x), f(a.y, p.y), f(a.z, p.z), f(a.w, p.w))
+    }
     // 0 paused .. 1 playing, eased: everything that dims on pause follows this one
     property real live: Player.playing ? 1 : 0
     Behavior on live { NumberAnimation { duration: 500; easing.type: Easing.OutCubic } }
@@ -72,6 +79,7 @@ Item {
             readonly property real pitch: 4
             readonly property real frac: Player.frac
             readonly property vector2d textSpan: Qt.vector2d(box.x, box.x + Math.min(line.implicitWidth, box.width))
+            readonly property vector2d track: Qt.vector2d(box.x, box.x + box.width)
             readonly property vector4d sweeps: m.sweeps
             readonly property vector4d punches: Visualizer.beatPows
             readonly property real glow: 0.3 + 0.7 * m.live
@@ -88,7 +96,7 @@ Item {
             readonly property vector4d l6: Visualizer.l6
             readonly property vector4d l7: Visualizer.l7
             // Qt caches shaders by URL across reloads: bump ?v= after shaders/build.sh
-            fragmentShader: Qt.resolvedUrl("../shaders/pill.frag.qsb?v=11")
+            fragmentShader: Qt.resolvedUrl("../shaders/pill.frag.qsb?v=12")
         }
 
         // cover: a tinted glow behind it breathes with the bass
@@ -98,24 +106,35 @@ Item {
             height: cover.height
             radius: cover.radius
             color: Player.c1
+            scale: cover.scale
             opacity: m.live * (0.2 + Visualizer.bass * 0.6 + m.kick * 0.3)
             layer.enabled: true
             layer.effect: MultiEffect { blurEnabled: true; blur: 1; blurMax: 12 }
         }
-        ClippingRectangle {
+        // round, centred on the pill's rounded end so the gap around it is even. One layer,
+        // rendered at 54 px and masked to the circle, so the kick scales a sharp texture
+        // (a ClippingRectangle re-renders at native size and goes soft and shimmery when scaled)
+        Item {
             id: cover
-            x: 4
+            readonly property real radius: height / 2
+            x: (parent.height - height) / 2
             anchors.verticalCenter: parent.verticalCenter
             width: 18
             height: 18
-            radius: 6
-            color: Qt.alpha(Player.c2, 0.35)
-            scale: 1 + m.kick * 0.1
+            scale: 1 + m.kick * 0.08
             layer.enabled: true
+            layer.textureSize: Qt.size(54, 54)
+            layer.smooth: true
+            layer.mipmap: true
             layer.effect: MultiEffect {
                 saturation: -0.9 * (1 - m.live)
                 brightness: -0.15 * (1 - m.live)
+                maskEnabled: true
+                maskSource: coverMask
+                maskThresholdMin: 0.5
+                maskSpreadAtMin: 1
             }
+            Rectangle { anchors.fill: parent; color: Qt.alpha(Player.c2, 0.35) }
             Text {
                 anchors.centerIn: parent
                 visible: !art.ready
@@ -147,6 +166,17 @@ Item {
                 border.color: Qt.alpha("white", 0.12)
                 border.width: 1
             }
+        }
+
+        Rectangle {
+            id: coverMask
+            visible: false
+            width: cover.width
+            height: cover.height
+            radius: cover.radius
+            layer.enabled: true
+            layer.textureSize: Qt.size(54, 54)
+            layer.smooth: true
         }
 
         // title • artist, edge-faded and scrolling when it doesn't fit

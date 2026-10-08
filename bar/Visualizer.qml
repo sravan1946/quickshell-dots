@@ -59,11 +59,11 @@ Singleton {
     property var lv: new Array(32).fill(0)
     property var pk: new Array(32).fill(0)
     // onset detector state
-    property real prevBass: 0
+    property real prevBass: 0    // last frame's
+    property real prevBass2: 0   // the frame before
     property real riseMean: 0
     property real riseVar: 0
     property real riseMax: 0.05
-    property bool armed: true
 
     function clear() {
         lv.fill(0); pk.fill(0)
@@ -75,36 +75,35 @@ Singleton {
         beatStrength = 0
         beatAts = Qt.vector4d(-10, -10, -10, -10)
         beatPows = zero
-        prevBass = 0
-        armed = true
+        prevBass = prevBass2 = 0
     }
 
     // Kick onsets from how fast the low bands rise, not how loud they are: in busy
     // sections the bass sits high and only dips between kicks, in sparse ones it swells
-    // slowly, and a level threshold misfires on both. A rise beats when it clears the
-    // recent mean + 0.9 sd (~1.5 s EMA) plus a floor, once per rise (re-armed after it
-    // settles), at most every 200 ms. Strength is the rise against the biggest recent one.
+    // slowly, and a level threshold misfires on both. The rise is taken over two frames,
+    // since cava's smoothing spreads a kick across them. It beats when it clears the recent
+    // mean + 0.5 sd (~3 s EMA) plus a floor, at most every 200 ms. Strength is the rise
+    // against the biggest recent one.
     // Tuned offline on recorded cava frames (30 fps, noise_reduction 77).
     function detect(b) {
-        const d = Math.max(0, b - prevBass)
+        const d = Math.max(0, b - prevBass2)
+        prevBass2 = prevBass
         prevBass = b
         const sd = Math.sqrt(riseVar)
-        if (armed && d > riseMean + 0.9 * sd + 0.025 && t - beatAt >= 0.2) {
+        if (d > riseMean + 0.5 * sd + 0.01 && t - beatAt >= 0.2) {
             riseMax = Math.max(riseMax, d)
             const s = Math.min(1, d / riseMax)
-            if (s > 0.2 && Settings.beatEffects) {
+            if (Settings.beatEffects) {
                 beatAt = t
                 beatStrength = s
                 beatAts = Qt.vector4d(t, beatAts.x, beatAts.y, beatAts.z)
                 beatPows = Qt.vector4d(s, beatPows.x, beatPows.y, beatPows.z)
-                armed = false
                 beat(s)
             }
         }
-        if (d < riseMean + 0.3 * sd) armed = true
         riseMax = Math.max(0.05, riseMax * 0.997)
-        riseMean += (d - riseMean) / 45
-        riseVar += ((d - riseMean) * (d - riseMean) - riseVar) / 45
+        riseMean += (d - riseMean) / 90
+        riseVar += ((d - riseMean) * (d - riseMean) - riseVar) / 90
     }
 
     function publish() {

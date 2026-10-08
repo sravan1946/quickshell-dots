@@ -17,6 +17,7 @@ layout(std140, binding = 0) uniform buf {
     float pitch;     // column spacing, px
     float frac;      // track progress 0..1
     vec2 textSpan;   // px: where the title/artist run, dimmed behind for contrast
+    vec2 track;      // px: the progress line's ends (the text column, clear of the cover)
     vec4 sweeps;     // last four beats, newest in x: 0..1 since each (1 = spent)
     vec4 punches;    // their strengths, 0..1
     float glow;      // 0..1, overall strength (dims while paused)
@@ -106,10 +107,8 @@ void main() {
     c = over(vec4(vec3(hl), hl), c);
 
     // progress: hairline along the bottom, brighter where played, a glowing head
-    float inset = radius * 0.8;
-    float span = res.x - 2.0 * inset;
-    float headX = inset + frac * span;
-    float onLine = smoothstep(1.4, 0.6, y) * step(inset, px.x) * step(px.x, res.x - inset);
+    float headX = mix(track.x, track.y, frac);
+    float onLine = smoothstep(1.4, 0.6, y) * step(track.x, px.x) * step(px.x, track.y);
     float played = step(px.x, headX);
     float la = onLine * mix(0.08, 0.75, played);
     c = over(vec4(mix(vec3(1.0), c1.rgb, played) * la, la), c);
