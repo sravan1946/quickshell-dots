@@ -24,8 +24,8 @@ Scope {
     id: root
 
     required property var modelData
-    readonly property var screen: modelData
-    readonly property bool outerRight: !Quickshell.screens.some(s => s.x === screen.x + screen.width
+    readonly property var screen: modelData   // null for a moment when its monitor is unplugged
+    readonly property bool outerRight: !!screen && !Quickshell.screens.some(s => s.x === screen.x + screen.width
         && s.y < screen.y + screen.height && s.y + s.height > screen.y)
 
     property bool open: false
@@ -91,7 +91,7 @@ Scope {
         target: Config
         function onToggleQuick() {
             const focused = Hyprland.focusedMonitor?.name ?? Quickshell.screens[0].name
-            if (focused === root.screen.name) { root.edgeY = 0; root.open = !root.open; if (root.open) closer.stop() }
+            if (focused === root.screen?.name) { root.edgeY = 0; root.open = !root.open; if (root.open) closer.stop() }
         }
     }
 
@@ -178,7 +178,7 @@ Scope {
         margins.top: Config.height + 6
         // room around the card for the shadow; full height so a pulled-out list never resizes the surface
         implicitWidth: card.fullW + 8 + 40
-        implicitHeight: root.screen.height - Config.height - 6
+        implicitHeight: (root.screen?.height ?? 0) - Config.height - 6
         exclusionMode: ExclusionMode.Ignore
         color: "transparent"
         mask: root.open ? hit : nothing

@@ -56,34 +56,19 @@ Row {
             // "image://icon/<name>?path=<IconThemePath>" for theme icons, pixmaps otherwise
             readonly property string themeIcon: modelData.icon.startsWith("image://icon/") ? modelData.icon.slice(13).split("?")[0] : ""
             readonly property string themePath: decodeURIComponent((modelData.icon.match(/[?&]path=([^&]+)/) ?? [])[1] ?? "")
-            property string resolved: ""
-            property string resolvedFor: ""
-            onThemeIconChanged: finder.running = themeIcon !== ""
-            Component.onCompleted: finder.running = themeIcon !== ""
-            // running = false doesn't stop a live lookup at once, so when the icon flips fast
-            // (nm-applet on reconnect) the old name's lookup can land last: the name goes out
-            // first, a stale answer is ignored and the lookup reruns for the current name
-            Process {
-                id: finder
-                command: ["sh", "-c", 'echo "$1"; ' + Util.findIcon, "sh", item.themeIcon, item.themePath]
-                onRunningChanged: if (!running && item.themeIcon !== "" && item.resolvedFor !== item.themeIcon) running = true
-                stdout: StdioCollector {
-                    onStreamFinished: {
-                        const [name, file] = text.split("\n")
-                        item.resolvedFor = name
-                        item.resolved = file ? "file://" + file : ""
-                    }
-                }
-            }
-            icon: resolvedFor === themeIcon && resolved || modelData.icon
+            IconFile { id: finder; name: item.themeIcon; extra: item.themePath }
+            icon: finder.file || modelData.icon
             // waybar: bold title, then the description (SNI allows basic markup there)
             tip: modelData.tooltipTitle
                 ? `<b>${modelData.tooltipTitle}</b>` + (modelData.tooltipDescription ? "<br>" + modelData.tooltipDescription : "")
                 : modelData.title
-            // nm-applet: our own Wi-Fi panel (components/WifiMenu) instead of its menu
+            // nm-applet and blueman: our own Wi-Fi / Bluetooth panels (components/WifiMenu,
+            // BtMenu) instead of their menus
             readonly property bool nm: modelData.id === "nm-applet"
+            readonly property bool bt: modelData.id === "blueman"
             onClicked: b => {
                 if (nm && b !== Qt.MiddleButton) wifi.item.toggle()
+                else if (bt && b !== Qt.MiddleButton) bluetooth.item.toggle()
                 else if (b === Qt.RightButton || (b === Qt.LeftButton && leftOpensMenu)) {
                     if (modelData.hasMenu) menu.toggle()
                 } else if (b === Qt.LeftButton) modelData.activate()
@@ -93,6 +78,7 @@ Row {
 
             Menu { id: menu; target: item; handle: item.modelData.menu }
             LazyLoader { id: wifi; active: item.nm; WifiMenu { target: item } }
+            LazyLoader { id: bluetooth; active: item.bt; BtMenu { target: item } }
         }
     }
 }

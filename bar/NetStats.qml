@@ -47,7 +47,10 @@ Singleton {
         iface = best; rx = r; tx = t; last = now
     }
 
-    function refresh() { if (!nm.running) nm.running = true }
+    // a refresh asked for mid-fetch (a network switch, the hover timer) runs once that one ends,
+    // so the details never stay on the interface the fetch started with
+    property bool again: false
+    function refresh() { if (nm.running) again = true; else nm.running = true }
     onIfaceChanged: refresh()   // startup and network switches: quick settings shouldn't open on an empty info
 
     FileView { id: routeFile; path: "/proc/net/route" }
@@ -56,6 +59,7 @@ Singleton {
 
     Process {
         id: nm
+        onRunningChanged: if (!running && root.again) { root.again = false; running = true }
         command: ["sh", "-c", `
             ip -4 -o addr show dev '${root.iface}' | awk '{print "IP:" $4; exit}'
             nmcli -t -f GENERAL.CONNECTION dev show '${root.iface}'

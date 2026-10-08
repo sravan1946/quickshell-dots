@@ -1,7 +1,6 @@
 import QtQuick
 import Quickshell
 import Quickshell.Hyprland
-import Quickshell.Io
 import Quickshell.Wayland
 import qs
 import qs.components
@@ -38,15 +37,9 @@ Item {
                 onActiveChanged: if (active) slide.take(win)
                 readonly property string iconName: w ? DesktopEntries.heuristicLookup(w.appId)?.icon ?? w.appId : ""
                 // the app's own icon file (Util.findIcon: crisp at any scale), the provider until then
-                property string resolved: ""
-                onIconNameChanged: { resolved = ""; finder.running = false; finder.running = iconName !== "" }
-                Component.onCompleted: { finder.running = iconName !== ""; if (active) slide.take(win) }
-                Process {
-                    id: finder
-                    command: ["sh", "-c", Util.findIcon, "sh", iconName, "", "scalable 256x256 128x128 96x96 64x64 48x48 32x32"]
-                    stdout: StdioCollector { onStreamFinished: resolved = text.trim() ? "file://" + text.trim() : "" }
-                }
-                icon: resolved || (iconName ? Quickshell.iconPath(iconName, "application-x-executable") : "")
+                Component.onCompleted: if (active) slide.take(win)
+                IconFile { id: finder; name: iconName; sizes: "scalable 256x256 128x128 96x96 64x64 48x48 32x32" }
+                icon: finder.file || (iconName ? Quickshell.iconPath(iconName, "application-x-executable") : "")
                 tip: w?.title ?? ""
                 onClicked: b => b === Qt.MiddleButton ? w?.close() : w?.activate()
             }

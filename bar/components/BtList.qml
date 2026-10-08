@@ -11,12 +11,14 @@ Column {
     id: list
 
     property bool active: false
+    property bool hideConnected: false   // BtMenu shows those as cards above the list
+    property int limit: 8
     readonly property var adapter: Bluetooth.defaultAdapter
     // unnamed discoveries only carry their address as a name: noise
     readonly property var devices: (adapter?.devices.values ?? [])
-        .filter(d => d.paired || d.deviceName !== "")
+        .filter(d => (d.paired || d.deviceName !== "") && !(hideConnected && d.connected))
         .sort((a, b) => b.connected - a.connected || b.paired - a.paired || a.name.localeCompare(b.name))
-        .slice(0, 8)
+        .slice(0, limit)
     property bool scanning: false   // our own discovery, so we don't stop someone else's
     property string want: ""        // address being paired, to connect once it is
 
@@ -67,7 +69,7 @@ Column {
         visible: list.devices.length === 0
         width: parent.width
         leftPadding: 9
-        text: list.adapter?.discovering ? "Looking for devices…" : "No devices"
+        text: list.adapter?.discovering ? "Looking for devices…" : list.hideConnected ? "No other devices" : "No devices"
         color: Theme.mainFg
         opacity: 0.45
         font { family: Theme.font; pixelSize: 11 }
@@ -76,56 +78,71 @@ Column {
     // diffed by device: discovery churn updates rows in place instead of rebuilding them all
     Repeater {
         model: ScriptModel { values: list.devices }
-        Rectangle {
-            id: row
+        Column {
+            id: entry
             required property var modelData
-            readonly property var d: modelData
-            readonly property bool busy: d.pairing || d.state === BluetoothDeviceState.Connecting
-                || d.state === BluetoothDeviceState.Disconnecting
+            required property int index
             width: parent.width
-            height: 30
-            radius: 9
-            color: d.connected ? Qt.alpha(Theme.actBg, 0.25) : rowHover.hovered ? Qt.alpha(Theme.mainFg, 0.12) : "transparent"
-            Behavior on color { ColorAnimation { duration: 120 } }
-            HoverHandler { id: rowHover; cursorShape: Qt.PointingHandCursor }
-            TapHandler { onTapped: if (!row.busy) list.tap(row.d) }
-            TapHandler { acceptedButtons: Qt.RightButton; onTapped: if (row.d.paired) row.d.forget() }
-            Connections {
-                target: row.d
-                function onPairedChanged() { if (row.d.paired && list.want === row.d.address) { list.want = ""; row.d.connect() } }
+            spacing: 3
+            // unpaired devices come last (the sort): a label before the first of them
+            Text {
+                visible: !entry.modelData.paired && entry.index > 0 && !!list.devices[entry.index - 1]?.paired
+                topPadding: 6
+                text: "Nearby"
+                color: Theme.mainFg
+                opacity: 0.55
+                font { family: Theme.font; pixelSize: 11; bold: true }
             }
+            Rectangle {
+                id: row
+                readonly property var d: entry.modelData
+                readonly property bool busy: d.pairing || d.state === BluetoothDeviceState.Connecting
+                    || d.state === BluetoothDeviceState.Disconnecting
+                width: parent.width
+                height: 30
+                radius: 9
+                color: d.connected ? Qt.alpha(Theme.actBg, 0.25) : rowHover.hovered ? Qt.alpha(Theme.mainFg, 0.12) : "transparent"
+                Behavior on color { ColorAnimation { duration: 120 } }
+                HoverHandler { id: rowHover; cursorShape: Qt.PointingHandCursor }
+                TapHandler { onTapped: if (!row.busy) list.tap(row.d) }
+                TapHandler { acceptedButtons: Qt.RightButton; onTapped: if (row.d.paired) row.d.forget() }
+                Connections {
+                    target: row.d
+                    function onPairedChanged() { if (row.d.paired && list.want === row.d.address) { list.want = ""; row.d.connect() } }
+                }
 
-            RowLayout {
-                anchors { fill: parent; leftMargin: 9; rightMargin: 9 }
-                spacing: 9
-                Text {
-                    text: Theme.g(list.glyph(row.d.icon))
-                    color: Theme.mainFg
-                    opacity: row.d.paired ? 1 : 0.6
-                    font { family: Theme.font; pixelSize: 13 }
-                }
-                Text {
-                    Layout.fillWidth: true
-                    text: row.d.name
-                    color: Theme.mainFg
-                    elide: Text.ElideRight
-                    font { family: Theme.font; pixelSize: 12; bold: row.d.connected }
-                }
-                Text {
-                    visible: text !== ""
-                    text: row.d.pairing ? "pairing…" : row.d.state === BluetoothDeviceState.Connecting ? "connecting…"
-                        : row.d.state === BluetoothDeviceState.Disconnecting ? "disconnecting…"
-                        : row.d.connected && row.d.batteryAvailable ? Math.round(row.d.battery * 100) + "%"
-                        : row.d.paired && !row.d.connected ? "paired" : ""
-                    color: row.busy ? Theme.actFg : Theme.mainFg
-                    opacity: row.busy ? 1 : 0.55
-                    font { family: Theme.font; pixelSize: 10 }
-                }
-                Text {
-                    visible: row.d.connected
-                    text: Theme.g(0xF012C)
-                    color: Theme.actFg
-                    font { family: Theme.font; pixelSize: 12 }
+                RowLayout {
+                    anchors { fill: parent; leftMargin: 9; rightMargin: 9 }
+                    spacing: 9
+                    Text {
+                        text: Theme.g(list.glyph(row.d.icon))
+                        color: Theme.mainFg
+                        opacity: row.d.paired ? 1 : 0.6
+                        font { family: Theme.font; pixelSize: 13 }
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        text: row.d.name
+                        color: Theme.mainFg
+                        elide: Text.ElideRight
+                        font { family: Theme.font; pixelSize: 12; bold: row.d.connected }
+                    }
+                    Text {
+                        visible: text !== ""
+                        text: row.d.pairing ? "pairing…" : row.d.state === BluetoothDeviceState.Connecting ? "connecting…"
+                            : row.d.state === BluetoothDeviceState.Disconnecting ? "disconnecting…"
+                            : row.d.connected && row.d.batteryAvailable ? Math.round(row.d.battery * 100) + "%"
+                            : ""
+                        color: row.busy ? Theme.actFg : Theme.mainFg
+                        opacity: row.busy ? 1 : 0.55
+                        font { family: Theme.font; pixelSize: 10 }
+                    }
+                    Text {
+                        visible: row.d.connected
+                        text: Theme.g(0xF012C)
+                        color: Theme.actFg
+                        font { family: Theme.font; pixelSize: 12 }
+                    }
                 }
             }
         }
