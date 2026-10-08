@@ -8,7 +8,12 @@ import qs.components
 Row {
     id: root
 
-    readonly property var streams: Pipewire.nodes.values.filter(n => n.isStream && n.properties["stream.monitor"] !== "true")
+    // node.properties stays empty until the node is tracked, so track every stream to read them.
+    // Monitor and capture-sink streams record what's playing (cava's visualizer), not the mic.
+    readonly property var all: Pipewire.nodes.values.filter(n => n.isStream)
+    PwObjectTracker { objects: root.all }
+    readonly property var streams: all.filter(n => String(n.properties["stream.monitor"]) !== "true"
+        && String(n.properties["stream.capture.sink"]) !== "true")
     readonly property var mics: streams.filter(n => n.properties["media.class"] === "Stream/Input/Audio")
     readonly property var casts: streams.filter(n => n.properties["media.class"] === "Stream/Input/Video")
 

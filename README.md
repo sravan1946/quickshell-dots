@@ -29,9 +29,14 @@ spectrum ring, throws sparks on each kick, and is tinted from the cover art. Cli
 to play/pause, scroll it to seek.
 
 **Quick settings.** Rest the pointer on the right screen edge, just below the bar, and the
-panel pours out of that point. It has Wi-Fi, Bluetooth, DND and caffeine tiles. The chevron on
-the Wi-Fi and Bluetooth tiles pulls out a list of networks or devices to connect to. Below the
-tiles are volume, mic and brightness sliders and the current track.
+panel pours out of that point. It holds only what the bar's pills don't: settings, lock and
+power buttons, night light (HyDE's hyprsunset), airplane mode, mic, your phone through KDE
+Connect (battery, tap to ring), output and input device pickers, a mic slider and a per-app volume mixer.
+
+**Power menu.** Replaces wlogout: the screen blurs, a big clock shows the date and uptime, and a
+pill of actions pours out under it. Lock and Suspend run at once; Log out, Reboot and Shut down
+have to be held (mouse, Enter or their letter) until a ring fills, so a stray press can't end
+the session.
 
 **Beat effects.** cava feeds a beat detector. Each kick flashes the pills, runs a wave
 along the bar and, with the plugin loaded, around the focused window's border.
@@ -57,13 +62,14 @@ Arch package names; tested on Hyprland 0.56 (Lua config), Quickshell 0.3.1, Qt 6
 | brightness | `brightnessctl` |
 | calendar events | `uv` (runs `scripts/gcal.py` with its own deps) |
 | clipboard copy | `wl-clipboard` |
-| lock / logout / mixer buttons | HyDE's `hyde-shell`, `pavucontrol` |
+| lock / logout / night light, mixer | HyDE's `hyde-shell`, `hyprsunset`, `pavucontrol` |
+| phone tile | `kdeconnect` |
 | building the plugin | `hyprland` headers, `pkgconf`, a C++23 compiler |
 | rebuilding shaders | `qt6-shadertools` (`qsb`) |
 
 Without HyDE the bar falls back to the Tokyo Night colours in `Theme.qml`; with it, theme
-switches recolour everything live. Only the lock, logout and mixer buttons call
-`hyde-shell` directly.
+switches recolour everything live. Lock, logout and night light call `hyde-shell`
+directly.
 
 ## Install
 
@@ -140,6 +146,7 @@ chmod 600 ~/.local/share/quickshell-bar/gcal-ics.url
 | logs | `qs log -c bar -f` |
 | hide / show the bar | `qs -c bar ipc call bar toggle` |
 | quick settings | `qs -c bar ipc call quick toggle`, or rest the pointer on the right edge |
+| power menu | `qs -c bar ipc call power toggle` (bind it in place of HyDE's logout menu) |
 | now playing | `qs -c bar ipc call media toggle`, or rest the pointer on the media pill |
 | settings | `qs -c bar ipc call settings toggle`, or `... settings page media` to open on a page |
 | change a setting | `qs -c bar ipc call settings set mediaStyle 2` (any key in `Settings.qml`, value as JSON) |

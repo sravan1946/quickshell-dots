@@ -56,7 +56,6 @@ PopupWindow {
         if (visible) {
             Tip.hide(); Tip.popups++; leaving = false; settleWait.restart(); settle()
             Tip.popupOpened(pop)
-            grab.active = closeOnOutsideClick
         } else { Tip.popups--; closedAt = Date.now(); leaving = false; card.reset(); settleWait.stop(); grab.active = false }
     }
     // A fresh popup maps at the wrong scale: on the 1.5x screen its dpr goes 2 -> 1 -> 1.5
@@ -65,11 +64,13 @@ PopupWindow {
     onDevicePixelRatioChanged: settle()
     function settle() { if (settleWait.running && devicePixelRatio === target?.QsWindow.window?.devicePixelRatio) appear() }
     Timer { id: settleWait; interval: 250; onTriggered: pop.appear() }
-    function appear() { settleWait.stop(); card.pour(spout) }
+    // the grab waits for the settled surface: taken at map time, while the dpr was still
+    // changing, Hyprland counted clicks inside the popup as outside it and it closed on any click
+    function appear() { settleWait.stop(); card.pour(spout); grab.active = closeOnOutsideClick }
     Component.onDestruction: if (visible) Tip.popups--
     function toggle() {
         if (visible && !leaving) close()
-        else if (visible) { leaving = false; card.pour(spout) }   // reopened mid-drain
+        else if (visible) { leaving = false; card.pour(spout); grab.active = closeOnOutsideClick }   // reopened mid-drain
         else if (Date.now() - closedAt > 250) visible = true
     }
     function close() { if (visible && !leaving) { leaving = true; settleWait.stop(); grab.active = false; card.drain(spout) } }

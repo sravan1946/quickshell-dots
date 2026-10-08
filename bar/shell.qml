@@ -36,6 +36,7 @@ ShellRoot {
 
     // one settings GUI for all monitors; opens on the focused one via Config.openSettings()
     SettingsPanel {}
+    PowerMenu {}
 
     IpcHandler {
         target: "quick"

@@ -5,20 +5,20 @@ import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
 import Quickshell.Hyprland
-import Quickshell.Widgets
 import Quickshell.Bluetooth
 import Quickshell.Services.Pipewire
-import Quickshell.Services.UPower
 import qs
 import qs.components
 
 // Quick settings, one per monitor. Rest the pointer on the right screen edge (top part,
 // below the bar) and the panel pours out of that point like liquid
 // (components/LiquidCard.qml); once the pointer leaves, a hole opens where it went out and
-// eats the panel away (the Now Playing panel's animation). The Wi-Fi and Bluetooth tiles'
-// chevrons pull out a device list under the tiles.
+// eats the panel away (the Now Playing panel's animation).
 // Only the outer right edge is hot: an edge shared with another monitor would fire on
 // every crossing. `qs -c bar ipc call quick toggle` opens it on the focused monitor.
+// It holds only what the bar doesn't: Wi-Fi, Bluetooth, DND, caffeine, battery, volume,
+// brightness and media all have their pill. Here: session buttons, night light, airplane
+// mode, mic, the phone (KDE Connect), audio device pickers and a per-app mixer.
 Scope {
     id: root
 
@@ -29,59 +29,81 @@ Scope {
 
     property bool open: false
     property real edgeY: 0       // where the pointer touched the edge (panel-window y); spawn point
-    property string section: ""  // "wifi" | "bt": the list pulled out under the tiles
-    readonly property bool busy: out.pressed || mic.pressed || bri.pressed   // mid-drag: don't close
+    property string section: ""  // "out" | "in": the device list pulled out under its row
+    property int mixDrag: 0      // per-app sliders being dragged
+    readonly property bool busy: mic.pressed || nl.pressed || mixDrag > 0   // mid-drag: don't close
 
-    readonly property var sink: Pipewire.defaultAudioSink
     readonly property var src: Pipewire.defaultAudioSource
     readonly property var bt: Bluetooth.defaultAdapter
-    readonly property var btOn: Bluetooth.devices.values.filter(d => d.connected)
-    readonly property var player: Player.player
-    readonly property var bat: UPower.displayDevice
-    readonly property int batPct: Math.round(bat.percentage <= 1 ? bat.percentage * 100 : bat.percentage)
+    // playback streams: apps sending audio out. Quickshell counts these as sinks (Spotify's
+    // stream: isSink true; cava's recording stream: false), and node.properties stays empty
+    // until a node is tracked, so media.class can't be used to pick them
+    readonly property var streams: Pipewire.nodes.values.filter(n => n.isStream && n.isSink && n.audio)
+    PwObjectTracker { objects: [root.src].concat(root.streams) }
 
-    PwObjectTracker { objects: [root.sink, root.src] }
+    // apps by name; ALSA devices by profile ("Speaker", not "Ryzen HD Audio Controller Speaker")
+    function nodeName(n) { return n?.properties?.["application.name"] || n?.properties?.["device.profile.description"] || n?.description || n?.nickname || n?.name || "" }
+    function launch(cmd) { root.open = false; Util.run(cmd) }
 
-    // ---- power-profiles-daemon (powerprofilesctl) ----
-    // Current profile + whether the tool exists at all. `powerprofilesctl get` prints the
-    // active profile (power-saver | balanced | performance) or fails if ppd/the CLI is
-    // missing -- in which case ppdAvailable stays false and the tile degrades to a no-op.
-    property string ppProfile: ""
-    property bool ppAvailable: false
-    readonly property var ppOrder: ["power-saver", "balanced", "performance"]
-    function ppIcon(p) {
-        return p === "power-saver" ? 0xF032A          // leaf
-            : p === "performance" ? 0xF14DE           // rocket-launch
-            : 0xF05D1                                 // scale-balance (balanced)
-    }
-    function ppRefresh() { ppGet.running = true }
-    function ppCycle() {
-        if (!ppAvailable) return
-        const i = ppOrder.indexOf(ppProfile)
-        const next = ppOrder[(i + 1) % ppOrder.length]
-        ppSet.command = ["powerprofilesctl", "set", next]
-        ppSet.running = true
-    }
+    // ---- uptime ----
+    property string uptime: ""
     Process {
-        id: ppGet
-        command: ["powerprofilesctl", "get"]
+        id: up
+        command: ["cat", "/proc/uptime"]
         stdout: StdioCollector {
-            onStreamFinished: { const p = text.trim(); if (p) { root.ppProfile = p; root.ppAvailable = true } }
+            onStreamFinished: {
+                const m = Math.floor(parseFloat(text) / 60), h = Math.floor(m / 60), d = Math.floor(h / 24)
+                root.uptime = d ? `${d}d ${h % 24}h` : h ? `${h}h ${m % 60}m` : `${m}m`
+            }
         }
-        onExited: code => { if (code !== 0) root.ppAvailable = false }
     }
+
+    // ---- night light: HyDE's hyprsunset.sh and its state file (temp|gamma|on|identity) ----
+    // "On" means toggled on AND warmer than identity: HyDE ships it on at 6000K, which tints nothing.
+    readonly property var nlState: (nlFile.text() || "6000|100|0|6000").trim().split("|").map(Number)
+    readonly property int nlTemp: nlState[0]
+    readonly property int nlIdentity: nlState[3] || 6000
+    readonly property bool nlOn: nlState[2] === 1 && nlTemp < nlIdentity
+    readonly property int nlMin: 2500
+    property int nlLive: 0       // temperature mid-drag, before the script saves it
+    FileView {
+        id: nlFile
+        path: (Quickshell.env("XDG_STATE_HOME") || Quickshell.env("HOME") + "/.local/state") + "/hyde/hyprsunset"
+        watchChanges: true
+        onFileChanged: reload()
+        onLoaded: root.nlLive = 0
+    }
+    function nlToggle() {
+        const sh = "hyde-shell hyprsunset.sh -q"
+        if (nlOn) return Util.run(`${sh} -t`)
+        const t = nlTemp < nlIdentity ? nlTemp : 4500
+        Util.run(nlState[2] === 1 ? `${sh} -s ${t}` : `${sh} -s ${t}; ${sh} -t`)
+    }
+    // while dragging talk to hyprsunset directly (the script is a slow bash start-up); save on release
+    Timer { id: nlApply; interval: 50; onTriggered: Util.run(`hyprctl --quiet hyprsunset temperature ${root.nlLive}`) }
+
+    // ---- phone (KDE Connect): first reachable device, its name and battery ----
+    property var phone: null     // { id, name, charge, charging }
     Process {
-        id: ppSet
-        onExited: root.ppRefresh()
+        id: phoneGet
+        command: ["sh", "-c", `
+            id=$(kdeconnect-cli -a --id-only 2>/dev/null | head -1); [ -n "$id" ] || exit 0
+            p=/modules/kdeconnect/devices/$id; g() { busctl --user get-property org.kde.kdeconnect "$@" 2>/dev/null | cut -d' ' -f2-; }
+            echo "$id|$(g $p org.kde.kdeconnect.device name | tr -d '"')|$(g $p/battery org.kde.kdeconnect.device.battery charge)|$(g $p/battery org.kde.kdeconnect.device.battery isCharging)"`]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const f = text.trim().split("|")
+                root.phone = f.length < 4 ? null : { id: f[0], name: f[1], charge: parseInt(f[2]), charging: f[3] === "true" }
+            }
+        }
     }
-    // read the current profile when the panel opens (and once at startup)
-    Component.onCompleted: ppRefresh()
 
     onOpenChanged: {
         Config.quickOpen = open
         if (open) {
             NetStats.refresh()
-            ppRefresh()
+            up.running = true
+            phoneGet.running = true
             // out of the screen edge (8px right of the card) where the pointer touched it
             card.pour(Qt.point(card.x + card.width + 8, card.y + Math.max(0, Math.min(card.height, root.edgeY))))
         } else card.drain(hover.last)
@@ -93,6 +115,7 @@ Scope {
             if (focused === root.screen?.name) { root.edgeY = 0; root.open = !root.open; if (root.open) closer.stop() }
         }
     }
+
 
     // pointer left the panel (or never reached it after an edge open)
     // the pointer pressed against the screen edge (edge strip) still counts as being on the panel
@@ -185,8 +208,6 @@ Scope {
         Region { id: nothing }
         WlrLayershell.layer: WlrLayer.Overlay
         WlrLayershell.namespace: "quicksettings"
-        // the Wi-Fi password field needs the keyboard
-        WlrLayershell.keyboardFocus: root.open && root.section === "wifi" ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
 
         HoverHandler {
             id: hover
@@ -215,6 +236,7 @@ Scope {
             border.color: Qt.alpha(Theme.mainFg, 0.35)
             border.width: 1
 
+
             ColumnLayout {
                 id: body
                 x: 16
@@ -222,28 +244,27 @@ Scope {
                 width: card.fullW - 32        // fixed: the layout doesn't reflow while the card morphs
                 spacing: 14
 
-                // battery · lock · power
+                // who · uptime · settings · lock · power
                 RowLayout {
                     Layout.fillWidth: true
-                    spacing: 8
-                    Text {
-                        visible: root.bat.isPresent
-                        text: Util.pick(Util.batteryIcons, root.batPct)
-                            + `  ${root.batPct}%`
-                        color: Theme.mainFg
-                        font { family: Theme.font; pixelSize: 13; bold: true }
+                    spacing: 6
+                    Rectangle {
+                        implicitWidth: 30
+                        implicitHeight: 30
+                        radius: 15
+                        color: Theme.actBg
+                        T { anchors.centerIn: parent; text: Theme.g(0xF0004); color: Theme.mainBg; font.pixelSize: 16 }   // account
                     }
-                    Text {
-                        Layout.fillWidth: true
-                        text: UPowerDeviceState.toString(root.bat.state)
-                        color: Theme.mainFg
-                        opacity: 0.6
-                        font { family: Theme.font; pixelSize: 11 }
-                        elide: Text.ElideRight
+                    ColumnLayout {
+                        Layout.leftMargin: 4
+                        spacing: 0
+                        T { text: Quickshell.env("USER"); font.bold: true; font.pixelSize: 13 }
+                        T { visible: !!root.uptime; text: "up " + root.uptime; opacity: 0.6; font.pixelSize: 11 }
                     }
-                    IconButton { icon: 0xF062E; onClicked: { root.open = false; Util.run("pavucontrol-qt -t 3 || pavucontrol -t 3") } }   // mixer
-                    IconButton { icon: 0xF0341; onClicked: { root.open = false; Util.run("hyde-shell lockscreen.sh") } }
-                    IconButton { icon: 0xF0425; onClicked: { root.open = false; Util.run("hyde-shell logoutlaunch 1") } }
+                    Item { Layout.fillWidth: true }   // pushes the buttons to the right edge
+                    IconButton { icon: 0xF0493; onClicked: { root.open = false; Config.openSettings() } }   // cog
+                    IconButton { icon: 0xF0341; onClicked: root.launch("hyde-shell lockscreen.sh") }       // lock
+                    IconButton { icon: 0xF0425; onClicked: { root.open = false; Config.togglePower() } }   // power menu
                 }
 
                 GridLayout {
@@ -252,106 +273,65 @@ Scope {
                     columnSpacing: 8
                     rowSpacing: 8
                     Tile {
-                        icon: NetStats.info.wifiOn ? 0xF05A9 : 0xF05AA
-                        label: "Wi-Fi"
-                        sub: !NetStats.info.wifiOn ? "Off" : NetStats.info.ssid || NetStats.info.conn || "On"
-                        on: !!NetStats.info.wifiOn
-                        more: true
-                        expanded: root.section === "wifi"
-                        onClicked: { Util.run(`nmcli radio wifi ${NetStats.info.wifiOn ? "off" : "on"}`); refreshSoon.restart() }
-                        onExpand: root.section = expanded ? "" : "wifi"
+                        icon: 0xF0594   // weather-night
+                        label: "Night light"
+                        sub: root.nlOn ? `${root.nlLive || root.nlTemp}K` : "Off"
+                        on: root.nlOn
+                        onClicked: root.nlToggle()
                     }
                     Tile {
-                        icon: root.bt?.enabled ? 0xF00AF : 0xF00B2
-                        label: "Bluetooth"
-                        sub: !root.bt ? "No adapter" : !root.bt.enabled ? "Off"
-                            : root.btOn.length === 1 ? root.btOn[0].name : root.btOn.length ? `${root.btOn.length} devices` : "On"
-                        on: !!root.bt?.enabled
-                        more: !!root.bt
-                        expanded: root.section === "bt"
-                        onClicked: if (root.bt) root.bt.enabled = !root.bt.enabled
-                        onExpand: root.section = expanded ? "" : "bt"
-                    }
-                    Tile {
-                        icon: Config.dnd ? 0xF009B : 0xF009A
-                        label: "Do not disturb"
-                        sub: Config.dnd ? `${Config.held} held` : "Off"
-                        on: Config.dnd
-                        onClicked: Config.dnd = !Config.dnd
-                    }
-                    Tile {
-                        icon: Config.caffeine ? 0xF0176 : 0xF06CA
-                        label: "Caffeine"
-                        sub: Config.caffeine ? "Staying awake" : "Off"
-                        on: Config.caffeine
-                        onClicked: Config.caffeine = !Config.caffeine
-                    }
-                    Tile {
-                        // power-profiles-daemon: show current profile, click to cycle
-                        icon: root.ppAvailable ? root.ppIcon(root.ppProfile) : 0xF06CA
-                        label: "Power profile"
-                        sub: !root.ppAvailable ? "Unavailable"
-                            : root.ppProfile === "power-saver" ? "Power saver"
-                            : root.ppProfile === "performance" ? "Performance" : "Balanced"
-                        on: root.ppAvailable && root.ppProfile === "performance"
-                        onClicked: root.ppCycle()
-                    }
-                    Tile {
-                        // open the central settings GUI; close the quick panel first
-                        icon: 0xF0493   // cog
-                        label: "Settings"
-                        sub: "Configure bar"
-                        onClicked: { root.open = false; Config.openSettings() }
-                    }
-                }
-
-                // pulled-out list for the Wi-Fi / Bluetooth tile. Never hidden (that would zero
-                // the list's height it opens to): collapsed it is 0 tall and cancels its own spacing
-                Item {
-                    Layout.fillWidth: true
-                    Layout.topMargin: -body.spacing
-                    implicitHeight: root.section ? lists.implicitHeight + body.spacing : 0
-                    Behavior on implicitHeight { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
-                    clip: true
-                    Column {
-                        id: lists
-                        y: body.spacing
-                        width: parent.width
-                        spacing: 8
-                        readonly property bool radioOn: root.section === "wifi" ? !!NetStats.info.wifiOn : !!root.bt?.enabled
-                        WifiList {
-                            visible: root.section === "wifi" && lists.radioOn
-                            width: parent.width
-                            active: root.open && root.section === "wifi" && lists.radioOn
+                        readonly property bool wifi: !!NetStats.info.wifiOn
+                        icon: on ? 0xF001D : 0xF001E   // airplane / airplane-off
+                        label: "Airplane mode"
+                        sub: on ? "Radios off" : "Off"
+                        on: !wifi && !root.bt?.enabled
+                        onClicked: {
+                            Util.run(`nmcli radio wifi ${on ? "on" : "off"}`)
+                            if (root.bt) root.bt.enabled = on
+                            refreshSoon.restart()
                         }
-                        BtList {
-                            visible: root.section === "bt" && lists.radioOn
-                            width: parent.width
-                            active: root.open && root.section === "bt" && lists.radioOn
-                        }
-                        Text {
-                            visible: !lists.radioOn
-                            leftPadding: 9
-                            text: root.section === "wifi" ? "Wi-Fi is off" : "Bluetooth is off"
-                            color: Theme.mainFg
-                            opacity: 0.45
-                            font { family: Theme.font; pixelSize: 11 }
-                        }
-                        PillButton {
-                            text: root.section === "wifi" ? Theme.g(0xF0493) + "  Connection editor" : Theme.g(0xF0493) + "  Bluetooth manager"
-                            onClicked: { root.open = false; Util.run(root.section === "wifi" ? "nm-connection-editor" : "blueman-manager") }
-                        }
+                    }
+                    Tile {
+                        readonly property bool muted: !!root.src?.audio?.muted
+                        icon: muted ? 0xF036D : 0xF036C
+                        label: "Microphone"
+                        sub: !root.src ? "None" : muted ? "Muted" : "On"
+                        on: !!root.src && !muted
+                        onClicked: if (root.src?.audio) root.src.audio.muted = !muted
+                    }
+                    Tile {
+                        icon: 0xF011C   // cellphone
+                        label: root.phone?.name || "Phone"
+                        sub: !root.phone ? "Not connected"
+                            : `${root.phone.charge}%${root.phone.charging ? " · charging" : ""} · tap to ring`
+                        on: !!root.phone
+                        onClicked: root.phone ? Util.run(`kdeconnect-cli -d ${root.phone.id} --ring`) : root.launch("kdeconnect-app")
                     }
                 }
 
                 SliderRow {
-                    id: out
-                    icon: root.sink?.audio?.muted ? 0xF0581 : Util.headphones(root.sink) ? 0xF02CB : 0xF057E
-                    value: root.sink?.audio?.volume ?? 0
-                    muted: !!root.sink?.audio?.muted
-                    onIconClicked: if (root.sink?.audio) root.sink.audio.muted = !root.sink.audio.muted
-                    onMoved: v => { if (root.sink?.audio) root.sink.audio.volume = v }
+                    id: nl
+                    visible: root.nlOn
+                    icon: 0xF050F   // thermometer
+                    readonly property int temp: root.nlLive || root.nlTemp
+                    value: (temp - root.nlMin) / (root.nlIdentity - root.nlMin)
+                    text: temp + "K"
+                    onIconClicked: root.nlToggle()
+                    onMoved: v => {
+                        root.nlLive = Math.round((root.nlMin + v * (root.nlIdentity - root.nlMin - 100)) / 100) * 100
+                        if (!nlApply.running) nlApply.start()
+                    }
+                    onPressedChanged: if (!pressed && root.nlLive) Util.run(`hyde-shell hyprsunset.sh -q -s ${root.nlLive}`)
                 }
+
+                // audio devices, each with its list pulled out under it
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 2
+                    DevicePicker { sink: true }
+                    DevicePicker { sink: false }
+                }
+
                 SliderRow {
                     id: mic
                     icon: root.src?.audio?.muted ? 0xF036D : 0xF036C
@@ -360,91 +340,32 @@ Scope {
                     onIconClicked: if (root.src?.audio) root.src.audio.muted = !root.src.audio.muted
                     onMoved: v => { if (root.src?.audio) root.src.audio.volume = v }
                 }
-                SliderRow {
-                    id: bri
-                    icon: Brightness.pct < 50 ? 0xF00DF : 0xF00E0
-                    value: Brightness.pct / 100
-                    onMoved: v => Brightness.set(v * 100)
-                }
 
-                // now playing
-                Rectangle {
-                    visible: !!root.player
+                // per-app mixer
+                ColumnLayout {
+                    visible: root.streams.length > 0
                     Layout.fillWidth: true
-                    implicitHeight: 68
-                    radius: 14
-                    color: Qt.alpha(Theme.mainFg, 0.08)
-
-                    // MPRIS position isn't pushed; ask for it while it's on screen
-                    Timer {
-                        interval: 1000
-                        repeat: true
-                        running: root.open && !!root.player?.isPlaying
-                        onTriggered: root.player.positionChanged()
-                    }
-
+                    spacing: 4
                     RowLayout {
-                        anchors { fill: parent; margins: 10 }
-                        spacing: 10
-                        ClippingRectangle {
-                            implicitWidth: 48
-                            implicitHeight: 48
-                            radius: 8
-                            color: Qt.alpha(Theme.mainFg, 0.15)
-                            Text {
-                                anchors.centerIn: parent
-                                visible: art.status !== Image.Ready
-                                text: Theme.g(0xF075A)
-                                color: Theme.mainFg
-                                font { family: Theme.font; pixelSize: 22 }
-                            }
-                            Image {
-                                id: art
-                                anchors.fill: parent
-                                source: root.player?.trackArtUrl ?? ""
-                                fillMode: Image.PreserveAspectCrop
-                                sourceSize: Qt.size(96, 96)
-                            }
+                        Layout.fillWidth: true
+                        ListHeader { Layout.fillWidth: true; text: "Apps" }
+                        IconButton { icon: 0xF062E; implicitWidth: 24; implicitHeight: 24; size: 13; onClicked: root.launch("pavucontrol-qt -t 1 || pavucontrol -t 1") }
+                    }
+                    Repeater {
+                        model: root.streams
+                        SliderRow {
+                            id: app
+                            required property var modelData
+                            readonly property var a: modelData.audio
+                            icon: a?.muted ? 0xF0581 : 0xF057E
+                            label: root.nodeName(modelData)
+                            value: a?.volume ?? 0
+                            muted: !!a?.muted
+                            onIconClicked: if (a) a.muted = !a.muted
+                            onMoved: v => { if (a) a.volume = v }
+                            onPressedChanged: root.mixDrag += pressed ? 1 : -1
+                            Component.onDestruction: if (pressed) root.mixDrag--
                         }
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            spacing: 2
-                            Text {
-                                Layout.fillWidth: true
-                                text: root.player?.trackTitle || root.player?.identity || ""
-                                color: Theme.mainFg
-                                font { family: Theme.font; pixelSize: 12; bold: true }
-                                elide: Text.ElideRight
-                            }
-                            Text {
-                                Layout.fillWidth: true
-                                text: root.player?.trackArtist ?? ""
-                                color: Theme.actFg
-                                font { family: Theme.font; pixelSize: 11 }
-                                elide: Text.ElideRight
-                            }
-                            Rectangle {
-                                Layout.fillWidth: true
-                                Layout.topMargin: 4
-                                implicitHeight: 3
-                                radius: 2
-                                color: Qt.alpha(Theme.mainFg, 0.18)
-                                Rectangle {
-                                    height: parent.height
-                                    radius: 2
-                                    color: Theme.mainFg
-                                    width: root.player?.lengthSupported && root.player.length > 0
-                                        ? parent.width * Math.min(1, root.player.position / root.player.length) : 0
-                                }
-                            }
-                        }
-                        IconButton { icon: 0xF04AE; enabled: !!root.player?.canGoPrevious; onClicked: root.player.previous() }
-                        IconButton {
-                            icon: root.player?.isPlaying ? 0xF03E4 : 0xF040A
-                            size: 20
-                            onClicked: root.player.togglePlaying()
-                        }
-                        IconButton { icon: 0xF04AD; enabled: !!root.player?.canGoNext; onClicked: root.player.next() }
                     }
                 }
             }
@@ -453,11 +374,69 @@ Scope {
     }
     Timer { id: refreshSoon; interval: 700; onTriggered: NetStats.refresh() }
 
+    component T: Text {
+        color: Theme.mainFg
+        font { family: Theme.font; pixelSize: 12 }
+    }
+
+    // "Output  Speakers ▾": click pulls out every device of that kind, click one to make it the default
+    component DevicePicker: ColumnLayout {
+        id: dp
+        property bool sink
+        readonly property string key: sink ? "out" : "in"
+        readonly property bool expanded: root.section === key
+        readonly property var current: sink ? Pipewire.defaultAudioSink : Pipewire.defaultAudioSource
+        readonly property var nodes: Pipewire.nodes.values.filter(n => n.audio && !n.isStream && n.isSink === dp.sink)
+        Layout.fillWidth: true
+        spacing: 2
+        ListRow {
+            Layout.fillWidth: true
+            onClicked: root.section = dp.expanded ? "" : dp.key
+            T { text: Theme.g(dp.sink ? 0xF04C3 : 0xF036C); font.pixelSize: 14 }   // speaker / microphone
+            T { text: dp.sink ? "Output" : "Input"; opacity: 0.55; font.pixelSize: 11; Layout.preferredWidth: 40 }
+            T { Layout.fillWidth: true; text: dp.current ? root.nodeName(dp.current) : "None"; elide: Text.ElideRight }
+            T {
+                text: Theme.g(0xF0140)   // chevron-down
+                opacity: dp.expanded ? 1 : 0.5
+                rotation: dp.expanded ? 180 : 0
+                Behavior on rotation { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+            }
+        }
+        Item {
+            Layout.fillWidth: true
+            implicitHeight: dp.expanded ? devList.implicitHeight : 0
+            Behavior on implicitHeight { NumberAnimation { duration: 240; easing.type: Easing.OutCubic } }
+            clip: true
+            Column {
+                id: devList
+                width: parent.width
+                leftPadding: 22
+                spacing: 2
+                Repeater {
+                    model: dp.nodes
+                    ListRow {
+                        required property var modelData
+                        width: devList.width - devList.leftPadding
+                        selected: modelData === dp.current
+                        onClicked: {
+                            if (dp.sink) Pipewire.preferredDefaultAudioSink = modelData
+                            else Pipewire.preferredDefaultAudioSource = modelData
+                            root.section = ""
+                        }
+                        T { Layout.fillWidth: true; text: root.nodeName(modelData); elide: Text.ElideRight; font.pixelSize: 11 }
+                    }
+                }
+            }
+        }
+    }
+
     component SliderRow: RowLayout {
         id: sr
         property int icon
+        property string label: ""     // a name before the slider (the mixer's apps)
         property real value
         property bool muted: false
+        property string text: Math.round(value * 100) + "%"
         readonly property bool pressed: slider.pressed
         signal iconClicked()
         signal moved(real v)
@@ -465,6 +444,14 @@ Scope {
         Layout.fillWidth: true
         spacing: 10
         IconButton { icon: sr.icon; dim: sr.muted; onClicked: sr.iconClicked() }
+        T {
+            visible: !!sr.label
+            Layout.preferredWidth: 72
+            text: sr.label
+            elide: Text.ElideRight
+            font.pixelSize: 11
+            opacity: sr.muted ? 0.5 : 0.85
+        }
         Slider {
             id: slider
             Layout.fillWidth: true
@@ -473,9 +460,9 @@ Scope {
             onMoved: v => sr.moved(v)
         }
         Text {
-            Layout.preferredWidth: 38
+            Layout.preferredWidth: 44
             horizontalAlignment: Text.AlignRight
-            text: Math.round(sr.value * 100) + "%"
+            text: sr.text
             color: sr.muted ? Qt.alpha(Theme.mainFg, 0.5) : Theme.actFg
             font { family: Theme.font; pixelSize: 12; bold: true }
         }

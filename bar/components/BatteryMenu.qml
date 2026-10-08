@@ -7,8 +7,9 @@ import qs
 
 // The panel the battery pill opens (modules/Battery.qml), laid out like the Wi-Fi and
 // Bluetooth ones: the charge with what it's doing and how long it'll take, the power
-// profile (power-profiles-daemon), then the battery's health, wear and draw. Cycle count and
-// the charge limit aren't in UPower, so they're read from sysfs.
+// last 12 hours of charge (UPower's own history), the power profile (power-profiles-daemon),
+// then the battery's health, wear and draw. Cycle count and the charge limit aren't in UPower,
+// so they're read from sysfs.
 Dropdown {
     id: menu
 
@@ -29,7 +30,24 @@ Dropdown {
     readonly property int limit: parseInt(limitFile.text()) || 100
     FileView { id: cycleFile; path: menu.sys ? menu.sys + "/cycle_count" : "" }
     FileView { id: limitFile; path: menu.sys ? menu.sys + "/charge_control_end_threshold" : "" }
-    onVisibleChanged: if (visible) { cycleFile.reload(); limitFile.reload() }
+    onVisibleChanged: if (visible) { cycleFile.reload(); limitFile.reload(); histGet.running = true }
+
+    // UPower's charge history over D-Bus (its files under /var/lib/upower are root-only):
+    // [time, percent, state] newest first, logged on every change. State 0 ("unknown") is a
+    // bogus sample upower writes at boot, so it's dropped.
+    readonly property int span: 12 * 3600
+    property var hist: []
+    Process {
+        id: histGet
+        command: ["busctl", "--system", "--json=short", "call", "org.freedesktop.UPower",
+            "/org/freedesktop/UPower/devices/battery_" + menu.sys.split("/").pop(),
+            "org.freedesktop.UPower.Device", "GetHistory", "suu", "charge", String(menu.span), "300"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                try { menu.hist = JSON.parse(text).data[0].filter(p => p[2] !== 0).reverse() } catch (e) { menu.hist = [] }
+            }
+        }
+    }
 
     closeOnOutsideClick: true
     padX: 12
@@ -100,6 +118,59 @@ Dropdown {
                         radius: 1
                         color: Theme.mainFg
                         opacity: 0.6
+                    }
+                }
+            }
+        }
+
+        // ---- the last 12 hours: charge over time, shaded where it was charging ----
+        ListHeader { width: parent.width; text: "Last 12 hours" }
+        Column {
+            width: parent.width
+            spacing: 4
+            Canvas {
+                id: graph
+                width: parent.width
+                height: 64
+                // hist plus where it is right now (upower logs nothing while the level holds)
+                readonly property var pts: menu.hist.concat([[Date.now() / 1000, menu.cap, menu.charging ? 1 : 2]])
+                onPtsChanged: requestPaint()
+                onWidthChanged: requestPaint()
+                onPaint: {
+                    const ctx = getContext("2d")
+                    ctx.reset()
+                    const now = Date.now() / 1000, p = pts
+                    const x = t => width * (1 - (now - t) / menu.span)
+                    const y = v => height - 2 - v / 100 * (height - 4)
+                    // gridlines at 0 / 50 / 100
+                    ctx.fillStyle = Qt.alpha(Theme.mainFg, 0.08)
+                    for (const v of [0, 50, 100]) ctx.fillRect(0, Math.round(y(v)), width, 1)
+                    if (p.length < 2) return
+                    // charging stretches (state 1) as faint bands
+                    ctx.fillStyle = Qt.alpha(Theme.actBg, 0.14)
+                    for (let i = 0; i < p.length - 1; i++)
+                        if (p[i][2] === 1) ctx.fillRect(x(p[i][0]), 0, x(p[i + 1][0]) - x(p[i][0]), height)
+                    const line = () => { ctx.beginPath(); p.forEach((q, i) => i ? ctx.lineTo(x(q[0]), y(q[1])) : ctx.moveTo(x(q[0]), y(q[1]))) }
+                    line()
+                    ctx.lineTo(x(p[p.length - 1][0]), height); ctx.lineTo(x(p[0][0]), height); ctx.closePath()
+                    ctx.fillStyle = Qt.alpha(menu.level, 0.25); ctx.fill()
+                    line()
+                    ctx.strokeStyle = menu.level; ctx.lineWidth = 1.6; ctx.lineJoin = "round"; ctx.stroke()
+                }
+            }
+            Item {
+                width: parent.width
+                height: 12
+                Repeater {
+                    model: ["12h ago", "6h", "now"]
+                    Text {
+                        required property string modelData
+                        required property int index
+                        x: index === 0 ? 0 : index === 1 ? (parent.width - width) / 2 : parent.width - width
+                        text: modelData
+                        color: Theme.mainFg
+                        opacity: 0.45
+                        font { family: Theme.font; pixelSize: 10 }
                     }
                 }
             }

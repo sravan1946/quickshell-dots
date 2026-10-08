@@ -25,6 +25,7 @@ Singleton {
     signal toggleQuick()             // `qs -c bar ipc call quick toggle`: open/close it on the focused monitor
     property bool settingsOpen: false // the central settings GUI (SettingsPanel) is open
     signal openSettings()            // asks the one SettingsPanel to open on the focused monitor
+    signal togglePower()             // opens/closes the power menu (PowerMenu.qml) on the focused monitor
     property bool barVisible: true   // toggled by `qs -c bar ipc call bar toggle` (SUPER+CTRL+B)
 
     // DND survives qs restarts
