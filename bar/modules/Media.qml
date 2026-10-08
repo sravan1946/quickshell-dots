@@ -11,7 +11,7 @@ import qs.components
 // glows with the bass and greys out on pause; titles slide in on a new track and scroll,
 // edge-faded, when they don't fit. Resting the pointer on it shows the Now Playing panel
 // (NowPlaying.qml) below; click plays/pauses.
-// Folds away while no player is around. Wants a pill with padL/padR 0 (Config.qml).
+// Folds away while no player is around, or after 10 minutes paused (Player.idle). Wants a pill with padL/padR 0 (Config.qml).
 Item {
     id: m
     readonly property var player: Player.player
@@ -46,7 +46,7 @@ Item {
     readonly property real textMax: 190
     readonly property real textW: Math.max(textMin, Math.min(line.implicitWidth, textMax))
     height: parent ? parent.height : 24
-    implicitWidth: player ? 32 + textW + 14 : 0
+    implicitWidth: player && !Player.idle ? 32 + textW + 14 : 0
     Behavior on implicitWidth { NumberAnimation { duration: 380; easing.type: Easing.OutQuint } }
 
     // a short dwell, so sweeping the pointer across the bar doesn't pop it open
@@ -127,6 +127,18 @@ Item {
                 id: art
                 anchors.fill: parent
                 sourceSize: Qt.size(54, 54)
+            }
+            Rectangle {   // paused: a scrim and a pause glyph over the cover
+                anchors.fill: parent
+                color: Qt.alpha("black", 0.45)
+                opacity: 1 - m.live
+                visible: opacity > 0
+                Text {
+                    anchors.centerIn: parent
+                    text: Theme.g(0xF03E4)
+                    color: "white"
+                    font { family: Theme.font; pixelSize: 12 }
+                }
             }
             Rectangle {   // hairline inner border, keeps dark covers from melting into the pill
                 anchors.fill: parent

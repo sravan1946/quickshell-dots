@@ -6,6 +6,7 @@ import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
 import Quickshell.Hyprland
+import Quickshell.Services.Mpris
 import Quickshell.Widgets
 import qs
 import qs.components
@@ -88,6 +89,9 @@ Scope {
             LiquidCard {
                 id: card
                 property real kick: 0   // 0..1, jumps on a beat and eases off
+                // 1 playing, 0 paused: the ring and its glow sink back while paused
+                property real live: Player.playing ? 1 : 0
+                Behavior on live { NumberAnimation { duration: 600; easing.type: Easing.OutCubic } }
                 readonly property real len: Player.length
                 readonly property real pos: Player.pos
                 readonly property real frac: Player.frac
@@ -128,26 +132,60 @@ Scope {
                     blurEnabled: true
                     blur: 1
                     blurMax: 64
-                    saturation: 0.2
-                    brightness: -0.2
+                    saturation: 0.6
+                    brightness: -0.45
                     opacity: bg.ready ? 0.85 : 0
                     Behavior on opacity { NumberAnimation { duration: 700 } }
                 }
                 Rectangle {
                     anchors.fill: parent
                     gradient: Gradient {
-                        GradientStop { position: 0; color: Qt.alpha(Theme.mainBg, 0.4) }
+                        GradientStop { position: 0; color: Qt.alpha(Theme.mainBg, 0.5) }
                         GradientStop { position: 0.65; color: Qt.alpha(Theme.mainBg, 0.7) }
                         GradientStop { position: 1; color: Qt.alpha(Theme.mainBg, 0.92) }
                     }
                 }
 
+                // header: the player, or with several around, a chip each to pick which one
+                // the pill and this panel follow; the album faded on the right
+                Row {
+                    id: players
+                    readonly property var list: Mpris.players.values
+                    x: 12
+                    y: 9
+                    spacing: 4
+                    Repeater {
+                        model: players.list
+                        Rectangle {
+                            id: chip
+                            required property var modelData
+                            readonly property bool current: modelData === win.player
+                            readonly property bool many: players.list.length > 1
+                            visible: many || current
+                            width: chipText.implicitWidth + 12
+                            height: 17
+                            radius: 8.5
+                            color: many && current ? Qt.alpha(Player.c1, 0.16) : chipHover.hovered && many ? Qt.alpha("white", 0.08) : "transparent"
+                            Behavior on color { ColorAnimation { duration: 150 } }
+                            Text {
+                                id: chipText
+                                anchors.centerIn: parent
+                                text: (chip.modelData.identity ?? "").toUpperCase()
+                                color: chip.current ? Qt.alpha(Player.c1, 0.85) : Qt.alpha(Theme.menuFg, 0.45)
+                                font { family: Theme.font; pixelSize: 9; letterSpacing: 2.5; bold: true }
+                            }
+                            HoverHandler { id: chipHover; enabled: chip.many; cursorShape: Qt.PointingHandCursor }
+                            TapHandler { enabled: chip.many; onTapped: Player.picked = chip.modelData }
+                        }
+                    }
+                }
                 Text {
-                    x: 18
-                    y: 14
-                    text: (win.player?.identity ?? "").toUpperCase()
-                    color: Qt.alpha(Player.c1, 0.7)
-                    font { family: Theme.font; pixelSize: 9; letterSpacing: 2.5; bold: true }
+                    anchors { left: players.right; leftMargin: 12; right: parent.right; rightMargin: 18; verticalCenter: players.verticalCenter }
+                    horizontalAlignment: Text.AlignRight
+                    elide: Text.ElideRight
+                    text: win.player?.trackAlbum || win.player?.metadata?.["xesam:album"] || ""
+                    color: Qt.alpha(Theme.menuFg, 0.45)
+                    font { family: Theme.font; pixelSize: 10 }
                 }
 
                 Item {
@@ -171,7 +209,7 @@ Scope {
                                 height: 250
                                 radius: 125
                                 color: Player.c2
-                                opacity: 0.1 + Visualizer.bass * 0.3 + card.kick * 0.25
+                                opacity: (0.1 + Visualizer.bass * 0.3 + card.kick * 0.25) * (0.3 + 0.7 * card.live)
                                 layer.enabled: true
                                 layer.effect: MultiEffect { blurEnabled: true; blur: 1; blurMax: 64 }
                             }
@@ -209,6 +247,7 @@ Scope {
                                 spokes: 120
                                 thick: 0.5
                                 halo: 0.8 + card.kick * 0.4
+                                opacity: 0.35 + 0.65 * card.live
                             }
                         }
                     }
@@ -238,7 +277,7 @@ Scope {
 
                 ColumnLayout {
                     id: info
-                    anchors { left: parent.left; right: parent.right; top: stage.bottom; leftMargin: 24; rightMargin: 24 }
+                    anchors { left: parent.left; right: parent.right; top: stage.bottom; topMargin: -18; leftMargin: 24; rightMargin: 24 }
                     spacing: 3
 
                     Swap {
@@ -284,6 +323,7 @@ Scope {
                             readonly property bool dragging: seekArea.pressed
                             readonly property bool hot: seekArea.containsMouse || dragging
                             property real at: 0   // 0..1 under the pointer while dragging
+                            property real over: 0 // 0..1 under the pointer while hovering
                             readonly property real shown: dragging ? at : card.frac
                             Layout.fillWidth: true
                             implicitHeight: 14
@@ -316,6 +356,24 @@ Scope {
                                 color: Qt.lighter(Player.c1, 1.3)
                                 Behavior on d { NumberAnimation { duration: 120 } }
                             }
+                            Rectangle {   // where a click lands
+                                readonly property real f: seek.dragging ? seek.at : seek.over
+                                visible: seek.hot && card.len > 0
+                                x: Math.max(-14, Math.min(parent.width - width + 14, parent.width * f - width / 2))
+                                y: -height - 4
+                                width: tip.implicitWidth + 12
+                                height: 18
+                                radius: 6
+                                color: Qt.alpha(Theme.mainBg, 0.9)
+                                border.color: Qt.alpha(Player.c1, 0.4)
+                                Text {
+                                    id: tip
+                                    anchors.centerIn: parent
+                                    text: win.fmt(parent.f * card.len)
+                                    color: Theme.menuFg
+                                    font { family: Theme.font; pixelSize: 10 }
+                                }
+                            }
                             MouseArea {
                                 id: seekArea
                                 anchors.fill: parent
@@ -324,7 +382,10 @@ Scope {
                                 enabled: !!win.player?.canSeek
                                 cursorShape: Qt.PointingHandCursor
                                 onPressed: e => seek.at = Math.max(0, Math.min(1, (e.x - 4) / seek.width))
-                                onPositionChanged: e => { if (pressed) seek.at = Math.max(0, Math.min(1, (e.x - 4) / seek.width)) }
+                                onPositionChanged: e => {
+                                    seek.over = Math.max(0, Math.min(1, (e.x - 4) / seek.width))
+                                    if (pressed) seek.at = seek.over
+                                }
                                 onReleased: win.player.position = seek.at * card.len
                             }
                         }
@@ -353,7 +414,7 @@ Scope {
         property bool big: false
         signal clicked()
 
-        implicitWidth: big ? 50 : 36
+        implicitWidth: big ? 52 : 40
         implicitHeight: implicitWidth
         radius: width / 2
         opacity: enabled ? 1 : 0.35
@@ -369,7 +430,8 @@ Scope {
             anchors.centerIn: parent
             text: Theme.g(b.icon)
             color: b.big ? Theme.mainBg : Theme.menuFg
-            font { family: Theme.font; pixelSize: b.big ? 24 : 18 }
+            font { family: Theme.font; pixelSize: b.big ? 24 : 21 }
         }
+
     }
 }

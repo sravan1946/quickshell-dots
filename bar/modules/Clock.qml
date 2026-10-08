@@ -35,6 +35,9 @@ Mod {
     function open(grab) {
         cal.shift = 0
         cal.selected = now
+        // the popup window is reused, so focus from an earlier click would come back the
+        // moment Hyprland hands it the keyboard on hover: the field waits for a real click
+        input.focus = false
         Cal.refresh()
         panel.closeOnOutsideClick = grab
         panel.toggle()

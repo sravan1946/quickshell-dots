@@ -5,13 +5,22 @@ import Quickshell.Io
 import Quickshell.Services.Mpris
 import qs
 
-// The MPRIS player the media module and the Now Playing panel follow (the playing one,
-// else the first), a colour palette pulled from its cover art, and the panel's state.
+// The MPRIS player the media module and the Now Playing panel follow (one picked in the
+// panel's header, else the playing one, else the first), a colour palette pulled from its
+// cover art, and the panel's state.
 Singleton {
     id: pl
 
-    readonly property var player: Mpris.players.values.find(p => p.isPlaying) ?? Mpris.players.values[0] ?? null
+    readonly property var auto: Mpris.players.values.find(p => p.isPlaying) ?? Mpris.players.values[0] ?? null
+    // a pick holds until that player goes away or another one becomes the playing one
+    // ponytail: only sees a start that changes `auto` (first playing in list order); track per-player starts if that bites
+    property var picked: null
+    onAutoChanged: if (auto?.isPlaying && auto !== picked) picked = null
+    readonly property var player: (picked && Mpris.players.values.includes(picked) ? picked : null) ?? auto
     readonly property bool playing: !!player?.isPlaying
+    // paused for 10 minutes: the pill folds away until it plays again
+    property bool idle: false
+    Timer { interval: 600000; running: !!pl.player && !pl.playing; onTriggered: pl.idle = true }
     readonly property string artUrl: player?.trackArtUrl ?? ""
 
     // Track position, s. Quickshell already advances player.position in real time; it
@@ -28,8 +37,8 @@ Singleton {
         target: pl.player
         function onTrackTitleChanged() { pl.refreshPos() }
     }
-    onPlayingChanged: refreshPos()
-    onPlayerChanged: refreshPos()
+    onPlayingChanged: { if (playing) idle = false; refreshPos() }
+    onPlayerChanged: { idle = false; refreshPos() }
     Timer { interval: 3000; repeat: true; running: pl.playing && !Visualizer.active; onTriggered: pl.refreshPos() }
 
     // Now Playing panel (NowPlaying.qml): which screen, centred under which x.
