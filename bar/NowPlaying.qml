@@ -506,6 +506,114 @@ Scope {
                             }
                         }
                     }
+                    // synced lyrics (Lyrics.qml), lyrics-plus style: a short list that glides to keep
+                    // the line being sung in the middle, the rest dimmed; backing vocals small under
+                    // their line. Long lines wrap. Click a line to jump there.
+                    ListView {
+                        id: lyricList
+                        visible: Lyrics.lines.length > 0
+                        Layout.fillWidth: true
+                        Layout.topMargin: 6
+                        implicitHeight: 150
+                        clip: true
+                        interactive: false
+                        // kept built while hidden: Lyrics.pos holds still then, so nothing here runs per
+                        // frame. On opening (and on a new track) the line jumps from none to the one
+                        // being sung: snap there instead of gliding down from the top.
+                        model: Lyrics.lines
+                        property bool snap: true
+                        function resnap() { snap = true; unsnap.restart() }
+                        onCountChanged: resnap()
+                        Connections { target: win; function onOpenChanged() { if (win.open) lyricList.resnap() } }
+                        Timer { id: unsnap; interval: 250; onTriggered: lyricList.snap = false }
+                        currentIndex: Math.max(0, Lyrics.index)
+                        highlightRangeMode: ListView.StrictlyEnforceRange
+                        preferredHighlightBegin: height / 2 - 18
+                        preferredHighlightEnd: height / 2 + 18
+                        highlightMoveDuration: snap ? 0 : 350
+                        highlightMoveVelocity: -1
+                        spacing: 6
+                        // the edges fade out instead of cutting lines in half
+                        layer.enabled: true
+                        layer.effect: MultiEffect {
+                            maskEnabled: true
+                            maskSource: lyricMask
+                            maskThresholdMin: 0.01
+                            maskSpreadAtMin: 1
+                        }
+                        delegate: Column {
+                            id: lyricLine
+                            required property var modelData
+                            required property int index
+                            readonly property bool now: index === Lyrics.index
+                            width: ListView.view.width
+                            spacing: 1
+                            opacity: now ? 1 : Math.abs(index - Lyrics.index) === 1 ? 0.45 : 0.25
+                            Behavior on opacity { NumberAnimation { duration: 250 } }
+                            // the current line grows a touch and brightens as it arrives
+                            scale: now ? 1 : 0.92
+                            Behavior on scale { SpringAnimation { spring: 4; damping: 0.35; epsilon: 0.002 } }
+                            // word-timed and current: each word fills in as it's sung (Sung below);
+                            // otherwise the plain line
+                            readonly property bool byWord: now && !!modelData.words
+                            Sung {
+                                visible: lyricLine.byWord
+                                width: parent.width
+                                words: visible ? lyricLine.modelData.words : []
+                                px: 14
+                                lit: Qt.lighter(Player.c1, 1.15)
+                                dim: Qt.alpha(Theme.menuFg, 0.45)
+                            }
+                            Text {
+                                visible: !lyricLine.byWord
+                                width: parent.width
+                                horizontalAlignment: Text.AlignHCenter
+                                wrapMode: Text.WordWrap
+                                text: lyricLine.modelData.text
+                                color: lyricLine.now ? Qt.lighter(Player.c1, 1.15) : Theme.menuFg
+                                Behavior on color { ColorAnimation { duration: 350; easing.type: Easing.OutCubic } }
+                                font { family: Theme.font; pixelSize: 14; bold: true }
+                            }
+                            Sung {
+                                visible: lyricLine.byWord && lyricLine.modelData.subWords?.length > 0
+                                width: parent.width
+                                words: visible ? lyricLine.modelData.subWords : []
+                                px: 11
+                                lit: Player.c1
+                                dim: Qt.alpha(Theme.menuFg, 0.35)
+                            }
+                            Text {
+                                visible: !lyricLine.byWord && text !== ""
+                                width: parent.width
+                                horizontalAlignment: Text.AlignHCenter
+                                wrapMode: Text.WordWrap
+                                text: lyricLine.modelData.sub ?? ""
+                                color: Theme.menuFg
+                                opacity: 0.6
+                                font { family: Theme.font; pixelSize: 11; bold: true }
+                            }
+                            TapHandler {
+                                enabled: !!win.player?.canSeek
+                                onTapped: win.player.position = lyricLine.modelData.t
+                            }
+                            HoverHandler { cursorShape: win.player?.canSeek ? Qt.PointingHandCursor : Qt.ArrowCursor }
+                        }
+                        Item {
+                            id: lyricMask
+                            anchors.fill: parent
+                            visible: false
+                            layer.enabled: true
+                            Rectangle {
+                                anchors.fill: parent
+                                gradient: Gradient {
+                                    GradientStop { position: 0; color: "transparent" }
+                                    GradientStop { position: 0.25; color: "white" }
+                                    GradientStop { position: 0.75; color: "white" }
+                                    GradientStop { position: 1; color: "transparent" }
+                                }
+                            }
+                        }
+                    }
                     // elapsed | seek bar | remaining; click or drag the bar to seek
                     RowLayout {
                         Layout.fillWidth: true
@@ -601,6 +709,78 @@ Scope {
                         Btn { icon: 0xF04AE; enabled: !!win.player?.canGoPrevious; onClicked: win.player.previous() }
                         Btn { icon: Player.playing ? 0xF03E4 : 0xF040A; big: true; onClicked: win.player.togglePlaying() }
                         Btn { icon: 0xF04AD; enabled: !!win.player?.canGoNext; onClicked: win.player.next() }
+                    }
+                }
+            }
+        }
+    }
+
+    // A word-timed lyric line ([{t, c}], Lyrics.qml), centred and wrapped by hand (Flow can't
+    // centre its rows): each word is drawn dim, with a lit copy over it revealed left to right
+    // across the time it's sung (until the next word starts, at most 1.5 s), hopping up a
+    // little meanwhile.
+    component Sung: Column {
+        id: sg
+        property var words: []
+        property int px: 14
+        property color lit
+        property color dim
+        FontMetrics { id: fm; font { family: Theme.font; pixelSize: sg.px; bold: true } }
+        // timed pieces joined only where the lyric has a space ("black-" + "fisted" stay one
+        // word on screen); `gap`: a space before it on its row
+        readonly property real sp: fm.advanceWidth(" ")
+        readonly property var rows: {
+            const out = [[]]
+            let x = 0, gap = false
+            words.forEach((w, i) => {
+                const c = w.c.trim()
+                if (!c) { gap = true; return }
+                if (/^\s/.test(w.c)) gap = true
+                const wd = fm.advanceWidth(c)
+                const next = words.slice(i + 1).find(n => n.c.trim())
+                const e = Math.min(next?.t ?? w.t + 0.6, w.t + 1.5)
+                if (x > 0 && gap && x + sp + wd > width) { out.push([]); x = 0 }
+                const g = x > 0 && gap
+                x += (g ? sp : 0) + wd
+                out[out.length - 1].push({ c: c, t: w.t, e: e, gap: g })
+                gap = /\s$/.test(w.c)
+            })
+            return out
+        }
+        Repeater {
+            model: sg.rows
+            Row {
+                id: row
+                required property var modelData
+                anchors.horizontalCenter: parent.horizontalCenter
+                Repeater {
+                    model: row.modelData
+                    Item {
+                        id: word
+                        required property var modelData
+                        readonly property real p: Math.max(0, Math.min(1, (Lyrics.pos - modelData.t) / Math.max(0.05, modelData.e - modelData.t)))
+                        readonly property real lead: modelData.gap ? sg.sp : 0
+                        width: lead + base.implicitWidth
+                        height: base.implicitHeight
+                        transform: Translate { y: -2 * Math.sin(Math.PI * word.p) }
+                        Text {
+                            id: base
+                            x: word.lead
+                            text: word.modelData.c
+                            color: sg.dim
+                            font: fm.font
+                        }
+                        Item {
+                            x: word.lead
+                            width: base.implicitWidth * word.p
+                            height: word.height
+                            clip: true
+                            Text {
+                                text: word.modelData.c
+                                color: sg.lit
+                                font: fm.font
+                            }
+                        }
                     }
                 }
             }

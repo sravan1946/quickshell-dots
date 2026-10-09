@@ -5,9 +5,8 @@ import Quickshell.Io
 
 // User-tunable values, edited live by SettingsPanel.qml and persisted to
 // ~/.config/quickshell-bar/settings.json. Referenced bare as `Settings.*` (import qs).
-// Numerically-delicate internals (the beat detector's EMA window, sd weighting and strength
-// floor in Visualizer.qml) are deliberately NOT exposed: they were tuned offline against
-// recorded cava frames and only make sense as a set.
+// The beat detector's sensitivity, floor and min gap are exposed; its EMA window and strength
+// decay (Visualizer.qml) stay internal: they were tuned offline against recorded cava frames.
 //
 // To add one: a key in `defaults` and a matching property. Saving, loading and reset()
 // all walk `defaults`, so nothing else needs touching.
@@ -45,6 +44,15 @@ Singleton {
         beatEffects: true,     // off: no beat wave, pill rims, window-border glow or sparks
         waveReach: 2600,
         waveDur: 1.0,
+        // beat detector (Visualizer.detect): a kick is a bass rise above the recent mean +
+        // beatSens × sd + beatFloor, at least beatGap s after the last
+        beatSens: 0.5,
+        beatFloor: 0.01,
+        beatGap: 0.2,
+
+        // synced lyrics from lrclib.net under the artist in the Now Playing panel
+        lyrics: true,
+        lyricsOffset: 0,       // s, + shows lines earlier
 
         // now playing pill backdrop: 0 columns, 1 ambient field, 2 mini EQ, 3 spectrum strip,
         // 4 waveform tail (shaders/pill.frag `style`)
@@ -95,6 +103,11 @@ Singleton {
     property bool   beatEffects:   defaults.beatEffects
     property real   waveReach:     defaults.waveReach
     property real   waveDur:       defaults.waveDur
+    property real   beatSens:      defaults.beatSens
+    property real   beatFloor:     defaults.beatFloor
+    property real   beatGap:       defaults.beatGap
+    property bool   lyrics:        defaults.lyrics
+    property real   lyricsOffset:  defaults.lyricsOffset
     property int    mediaStyle:    defaults.mediaStyle
     property int    panelLayout:   defaults.panelLayout
     property int    panelStyle:    defaults.panelStyle

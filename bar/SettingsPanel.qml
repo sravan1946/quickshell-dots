@@ -390,6 +390,51 @@ Scope {
                 value: Settings.waveDur
                 onEdited: v => Settings.waveDur = v
             }
+            SectionHeader { text: "Beat detection" }
+            Hint { text: "A kick is a bass rise that stands out from the last few seconds. Lower sensitivity and floor catch more (and more false) beats." }
+            SettingSlider {
+                enabled: Settings.beatEffects
+                label: "Sensitivity"
+                suffix: " sd"
+                decimals: 2
+                from: 0; to: 2.0; step: 0.05
+                value: Settings.beatSens
+                onEdited: v => Settings.beatSens = v
+            }
+            SettingSlider {
+                enabled: Settings.beatEffects
+                label: "Rise floor"
+                decimals: 3
+                from: 0; to: 0.08; step: 0.002
+                value: Settings.beatFloor
+                onEdited: v => Settings.beatFloor = v
+            }
+            SettingSlider {
+                enabled: Settings.beatEffects
+                label: "Min gap"
+                suffix: " s"
+                decimals: 2
+                from: 0.1; to: 0.6; step: 0.01
+                value: Settings.beatGap
+                onEdited: v => Settings.beatGap = v
+            }
+            SectionHeader { text: "Lyrics" }
+            SettingToggle {
+                label: "Show synced lyrics"
+                hint: "From lrclib.net, under the artist in the Now Playing panel"
+                checked: Settings.lyrics
+                onToggled: Settings.lyrics = !Settings.lyrics
+            }
+            SettingSlider {
+                enabled: Settings.lyrics
+                label: "Offset"
+                suffix: " s"
+                decimals: 2
+                from: -1.5; to: 1.5; step: 0.05
+                value: Settings.lyricsOffset
+                onEdited: v => Settings.lyricsOffset = v
+            }
+            Hint { visible: Settings.lyrics; text: "Lyrics early? Slide left. Bluetooth headphones usually want about −0.3 s." }
         }
     }
 

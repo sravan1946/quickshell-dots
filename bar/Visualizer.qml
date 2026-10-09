@@ -82,15 +82,15 @@ Singleton {
     // sections the bass sits high and only dips between kicks, in sparse ones it swells
     // slowly, and a level threshold misfires on both. The rise is taken over two frames,
     // since cava's smoothing spreads a kick across them. It beats when it clears the recent
-    // mean + 0.5 sd (~3 s EMA) plus a floor, at most every 200 ms. Strength is the rise
-    // against the biggest recent one.
-    // Tuned offline on recorded cava frames (30 fps, noise_reduction 77).
+    // mean + beatSens sd (~3 s EMA) plus beatFloor, at most every beatGap s (Settings).
+    // Strength is the rise against the biggest recent one.
+    // Defaults tuned offline on recorded cava frames (30 fps, noise_reduction 77).
     function detect(b) {
         const d = Math.max(0, b - prevBass2)
         prevBass2 = prevBass
         prevBass = b
         const sd = Math.sqrt(riseVar)
-        if (d > riseMean + 0.5 * sd + 0.01 && t - beatAt >= 0.2) {
+        if (d > riseMean + Settings.beatSens * sd + Settings.beatFloor && t - beatAt >= Settings.beatGap) {
             riseMax = Math.max(riseMax, d)
             const s = Math.min(1, d / riseMax)
             if (Settings.beatEffects) {

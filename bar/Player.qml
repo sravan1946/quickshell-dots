@@ -26,23 +26,51 @@ Singleton {
     Timer { interval: 600000; running: !!pl.player && !pl.playing; onTriggered: pl.idle = true }
     readonly property string artUrl: player?.trackArtUrl ?? ""
 
-    // Track position, s. Quickshell already advances player.position in real time; it
-    // just doesn't notify, so the binding re-reads it on Visualizer's frame clock (no timer
-    // or animation of its own), with a slow poll as a fallback when no frames arrive.
+    // Track position, s. Quickshell's player.position only extrapolates from the last
+    // position the player sent, and Spotify doesn't always send one on a loop or replay
+    // (no Seeked signal): it ran on past the track's end. So the position is asked for over
+    // D-Bus every 2 s while playing (10 s with the panel closed) (and just after anything moves it) and run on a clock of
+    // our own in between, re-read on Visualizer's frame clock (tick: the fallback without frames).
     readonly property real length: player?.lengthSupported ? player.length : 0
+    property real syncPos: -1      // s, the player's own answer; -1 until the first one
+    property double syncAt: 0      // epoch s it arrived
+    property int tick: 0
     readonly property real pos: {
-        Visualizer.t   // re-read every frame
-        return player?.positionSupported ? Math.min(length || Infinity, player.position) : 0
+        Visualizer.t; tick   // re-read every frame
+        if (!player?.positionSupported) return 0
+        const p = syncPos < 0 ? player.position : syncPos + (playing ? Date.now() / 1000 - syncAt : 0)
+        return Math.max(0, Math.min(length || Infinity, p))
     }
     readonly property real frac: length > 0 ? Math.min(1, pos / length) : 0
-    function refreshPos() { player?.positionChanged() }
+    function refreshPos() { tick++; syncSoon.restart() }
     Connections {
         target: pl.player
-        function onTrackTitleChanged() { pl.refreshPos() }
+        function onTrackTitleChanged() { pl.syncPos = -1; pl.refreshPos() }
+        function onPositionChanged() { syncSoon.restart() }   // a seek Quickshell did see (ours included)
     }
     onPlayingChanged: { if (playing) idle = false; refreshPos() }
-    onPlayerChanged: { idle = false; refreshPos() }
-    Timer { interval: 3000; repeat: true; running: pl.playing && !Visualizer.active; onTriggered: pl.refreshPos() }
+    onPlayerChanged: { idle = false; syncPos = -1; refreshPos() }
+    Timer { interval: 3000; repeat: true; running: pl.playing && !Visualizer.active; onTriggered: pl.tick++ }
+    Timer { id: syncSoon; interval: 150; onTriggered: pl.sync() }
+    // the panel's seek bar and lyrics want it tight; the pill's progress line doesn't
+    Timer { interval: pl.open ? 2000 : 10000; repeat: true; running: pl.playing; onTriggered: pl.sync() }
+    function sync() {
+        if (!player?.positionSupported || posQuery.running) return
+        posQuery.command = ["gdbus", "call", "--session", "--dest", player.dbusName, "--object-path", "/org/mpris/MediaPlayer2",
+                            "--method", "org.freedesktop.DBus.Properties.Get", "org.mpris.MediaPlayer2.Player", "Position"]
+        posQuery.running = true
+    }
+    Process {
+        id: posQuery
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const m = text.match(/(-?\d+)>/)   // "(<int64 164193007>,)", µs
+                if (!m) return
+                pl.syncPos = +m[1] / 1e6
+                pl.syncAt = Date.now() / 1000
+            }
+        }
+    }
 
     // Now Playing panel (NowPlaying.qml): which screen, centred under which x.
     // The bar pill opens it on hover (show) and it closes once the pointer is on neither.
