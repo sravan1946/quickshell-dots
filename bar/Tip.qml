@@ -12,7 +12,7 @@ Singleton {
     property Item pending: null    // module under the pointer, waiting out the delay
     property string screen: ""     // monitor of the hovered module: only that bar draws it
     property int popups: 0         // click popups open: tooltips stay away meanwhile
-    readonly property int delay: 400
+    readonly property int delay: Settings.tipDelay
 
     function hover(m, screenName) {
         grace.stop()

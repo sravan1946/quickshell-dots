@@ -555,7 +555,7 @@ Scope {
                             Behavior on scale { SpringAnimation { spring: 4; damping: 0.35; epsilon: 0.002 } }
                             // word-timed and current: each word fills in as it's sung (Sung below);
                             // otherwise the plain line
-                            readonly property bool byWord: now && !!modelData.words
+                            readonly property bool byWord: now && Settings.lyricsByWord && !!modelData.words
                             Sung {
                                 visible: lyricLine.byWord
                                 width: parent.width

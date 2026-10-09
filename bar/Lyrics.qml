@@ -11,7 +11,8 @@ Singleton {
     id: ly
 
     readonly property var player: Player.player
-    readonly property string key: Settings.lyrics && player?.trackTitle ? `${player.trackArtist}\n${player.trackTitle}` : ""
+    // (the sources setting is part of it, so flipping it refetches)
+    readonly property string key: Settings.lyrics && player?.trackTitle ? `${player.trackArtist}\n${player.trackTitle}\n${Settings.lyricsMusixmatch}` : ""
     property var lines: []
     // Settings.lyricsOffset: + shows lines earlier. The player's position runs ahead of what's
     // heard by the output's latency (Bluetooth: ~0.2-0.3 s), so there it wants to go negative.
@@ -34,7 +35,8 @@ Singleton {
         if (!key || req.running) return   // a running request refetches on exit if stale
         req.forKey = key
         req.command = ["python3", Qt.resolvedUrl("scripts/lyrics.py").toString().replace("file://", ""),
-                       player.trackArtist ?? "", player.trackTitle, player.trackAlbum ?? "", String(Math.round(Player.length) || "")]
+                       player.trackArtist ?? "", player.trackTitle, player.trackAlbum ?? "", String(Math.round(Player.length) || ""),
+                       Settings.lyricsMusixmatch ? "" : "--no-musixmatch"]
         req.running = true
     }
 

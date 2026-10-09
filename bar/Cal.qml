@@ -80,5 +80,5 @@ Singleton {
         }
         stderr: StdioCollector { onStreamFinished: if (text.trim()) console.warn("gcal:", text.trim()) }
     }
-    Timer { interval: 10 * 60 * 1000; running: true; repeat: true; triggeredOnStart: true; onTriggered: root.refresh() }
+    Timer { interval: Settings.calRefresh * 60 * 1000; running: true; repeat: true; triggeredOnStart: true; onTriggered: root.refresh() }
 }

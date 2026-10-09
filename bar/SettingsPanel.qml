@@ -17,6 +17,7 @@ Scope {
 
     property bool open: false
     property int page: 0
+    property string selMod: ""   // module picked in Bar → Layout
     // on the Media page the Now Playing panel is held open under the pill on the focused
     // monitor: every style choice shows live on the real pill and panel
     readonly property bool previewing: open && pages[page].title === "Media"
@@ -247,38 +248,99 @@ Scope {
         id: barPage
         ColumnLayout {
             spacing: 12
-            SectionHeader { text: "Modules" }
-            Hint { text: "Pick what shows in the bar. A pill left with nothing in it disappears." }
+            SectionHeader { text: "Layout" }
+            Hint { text: "Click a module, then move it along the bar: it steps one place at a time, across pills and sides. Own pill splits it off; a pill left empty disappears." }
             Repeater {
-                model: [["Left", Config.left], ["Centre", Config.center], ["Right", Config.right]]
+                model: [["Left", "left"], ["Centre", "center"], ["Right", "right"]]
                 ColumnLayout {
+                    id: sideCol
                     required property var modelData
                     Layout.fillWidth: true
                     spacing: 6
                     Text {
-                        text: modelData[0]
+                        text: sideCol.modelData[0]
                         color: Theme.mainFg
                         opacity: 0.55
                         font { family: Theme.font; pixelSize: 11 }
                     }
                     Flow {
                         Layout.fillWidth: true
-                        spacing: 6
+                        spacing: 8
                         Repeater {
-                            model: [].concat(...modelData[1].map(g => g.modules))
-                            PillButton {
-                                required property string modelData
-                                implicitHeight: 24
-                                checked: Settings.moduleShown(modelData)
-                                text: (checked ? Theme.g(0xF012C) + " " : "") + (root.moduleNames[modelData] ?? modelData)
-                                onClicked: Settings.setModuleShown(modelData, !checked)
+                            model: Settings.barLayout[sideCol.modelData[1]]
+                            Rectangle {   // one pill
+                                id: pillBox
+                                required property var modelData
+                                width: chips.implicitWidth + 8
+                                height: chips.implicitHeight + 8
+                                radius: height / 2
+                                color: "transparent"
+                                border { width: 1; color: Qt.alpha(Theme.mainFg, 0.3) }
+                                Row {
+                                    id: chips
+                                    anchors.centerIn: parent
+                                    spacing: 4
+                                    Repeater {
+                                        model: pillBox.modelData
+                                        PillButton {
+                                            required property string modelData
+                                            readonly property bool shown: Settings.moduleShown(modelData)
+                                            implicitHeight: 24
+                                            checked: root.selMod === modelData
+                                            opacity: shown ? 1 : 0.5
+                                            text: (shown ? "" : Theme.g(0xF0209) + " ") + (root.moduleNames[modelData] ?? modelData)
+                                            onClicked: root.selMod = checked ? "" : modelData
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
                 }
             }
+            Flow {
+                Layout.fillWidth: true
+                spacing: 6
+                PillButton { visible: root.selMod !== ""; implicitHeight: 24; text: Theme.g(0xF004D) + " Move"; onClicked: Settings.moveModule(root.selMod, -1) }
+                PillButton { visible: root.selMod !== ""; implicitHeight: 24; text: "Move " + Theme.g(0xF0054); onClicked: Settings.moveModule(root.selMod, 1) }
+                PillButton { visible: root.selMod !== ""; implicitHeight: 24; text: "Own pill"; onClicked: Settings.moveModule(root.selMod, 0) }
+                PillButton {
+                    visible: root.selMod !== ""
+                    implicitHeight: 24
+                    text: Settings.moduleShown(root.selMod) ? "Hide" : "Show"
+                    onClicked: Settings.setModuleShown(root.selMod, !Settings.moduleShown(root.selMod))
+                }
+                PillButton { implicitHeight: 24; text: "Reset layout"; onClicked: Settings.layout = Settings.defaults.layout }
+            }
             SectionHeader { text: "Clock" }
             SettingToggle { label: "24-hour time"; checked: Settings.clock24h; onToggled: Settings.clock24h = !Settings.clock24h }
+            SettingToggle {
+                label: "Show seconds"
+                hint: "Only the clock ticks each second; the calendar stays on minutes"
+                checked: Settings.clockSeconds
+                onToggled: Settings.clockSeconds = !Settings.clockSeconds
+            }
+            Hint { text: "Week starts on" }
+            StyleChoice {
+                names: ["Locale", "Monday", "Sunday"]
+                value: Settings.weekStart
+                onPicked: i => Settings.weekStart = i
+            }
+            SettingSlider {
+                label: "Calendar refresh"
+                suffix: " min"
+                from: 1; to: 60; step: 1
+                value: Settings.calRefresh
+                onEdited: v => Settings.calRefresh = v
+            }
+            SettingSlider {
+                label: "Join lights up"
+                suffix: " min"
+                from: 0; to: 30; step: 1
+                value: Settings.meetLead
+                onEdited: v => Settings.meetLead = v
+            }
+            Hint { text: "How long before a meeting its Join button in the calendar turns solid." }
             SectionHeader { text: "Visibility" }
             SettingToggle {
                 label: "Show the bar"
@@ -332,6 +394,14 @@ Scope {
             SectionHeader { text: "Network graph" }
             ColorRow { label: "Download colour"; value: Settings.netColDown; onEdited: v => Settings.netColDown = v }
             ColorRow { label: "Upload colour"; value: Settings.netColUp; onEdited: v => Settings.netColUp = v }
+            SettingSlider {
+                label: "Sample every"
+                suffix: " s"
+                decimals: 1
+                from: 1; to: 10; step: 0.5
+                value: Settings.netInterval / 1000
+                onEdited: v => Settings.netInterval = Math.round(v * 1000)
+            }
         }
     }
 
@@ -390,6 +460,30 @@ Scope {
                 value: Settings.waveDur
                 onEdited: v => Settings.waveDur = v
             }
+            SectionHeader { text: "Kick colours" }
+            SettingToggle {
+                enabled: Settings.beatEffects
+                label: "Colour kicks by their sound"
+                hint: "Off: every kick is the cover colour. On: deep kicks lean one way, clicky ones the other"
+                checked: Settings.kickTimbre
+                onToggled: Settings.kickTimbre = !Settings.kickTimbre
+            }
+            SettingSlider {
+                enabled: Settings.beatEffects && Settings.kickTimbre
+                label: "Hue range"
+                suffix: "°"
+                from: 0; to: 120; step: 1
+                value: Settings.kickHue
+                onEdited: v => Settings.kickHue = v
+            }
+            SettingSlider {
+                enabled: Settings.beatEffects && Settings.kickTimbre
+                label: "Lightness range"
+                decimals: 2
+                from: 0; to: 0.3; step: 0.01
+                value: Settings.kickLight
+                onEdited: v => Settings.kickLight = v
+            }
             SectionHeader { text: "Beat detection" }
             BeatScope { visible: Settings.beatEffects }
             Hint { text: "A kick is a bass rise that stands out from the last few seconds. Lower sensitivity and floor catch more (and more false) beats." }
@@ -426,6 +520,20 @@ Scope {
                 checked: Settings.lyrics
                 onToggled: Settings.lyrics = !Settings.lyrics
             }
+            SettingToggle {
+                enabled: Settings.lyrics
+                label: "Word-by-word"
+                hint: "Fill each word in as it's sung, when the lyrics have word timing"
+                checked: Settings.lyricsByWord
+                onToggled: Settings.lyricsByWord = !Settings.lyricsByWord
+            }
+            SettingToggle {
+                enabled: Settings.lyrics
+                label: "Use Musixmatch"
+                hint: "Word timing and more songs. Off: lrclib.net only, whole lines"
+                checked: Settings.lyricsMusixmatch
+                onToggled: Settings.lyricsMusixmatch = !Settings.lyricsMusixmatch
+            }
             SettingSlider {
                 enabled: Settings.lyrics
                 label: "Offset"
@@ -460,6 +568,14 @@ Scope {
                 value: Settings.liquidSpeed
                 onEdited: v => Settings.liquidSpeed = v
             }
+            SectionHeader { text: "Tooltips" }
+            SettingSlider {
+                label: "Show after"
+                suffix: " ms"
+                from: 0; to: 1500; step: 50
+                value: Settings.tipDelay
+                onEdited: v => Settings.tipDelay = v
+            }
             SectionHeader { text: "Quick settings" }
             SettingToggle {
                 label: "Open from the screen edge"
@@ -493,6 +609,12 @@ Scope {
                 from: 1; to: 20; step: 0.5
                 value: Settings.notifTimeout / 1000
                 onEdited: v => Settings.notifTimeout = Math.round(v * 1000)
+            }
+            SettingSlider {
+                label: "History keeps"
+                from: 10; to: 500; step: 10
+                value: Settings.historyMax
+                onEdited: v => Settings.historyMax = v
             }
 
             SectionHeader { text: "On-screen display" }

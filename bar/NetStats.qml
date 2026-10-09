@@ -8,7 +8,7 @@ import Quickshell.Io
 Singleton {
     id: root
 
-    readonly property int interval: 2000
+    readonly property int interval: Settings.netInterval
 
     property string iface: ""
     property real rx: 0

@@ -3,13 +3,11 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 
-// Bar layout. Each entry is one pill; `modules` are file names in modules/.
-//
-//   shape: "full" (default) | "right" (flat left edge) | "left" (flat right edge) | "down" (flat top)
-//   padL / padR: inner horizontal padding in px (default 6)
+// Shared bar state. Which pills hold which modules is Settings.layout (edited in Settings → Bar).
 //
 // To add a module: drop modules/Foo.qml (root an Item/Row, use components/Mod for
-// the look) and add "Foo" to a pill below. Saving reloads the bar live.
+// the look) and add "Foo" to a pill in Settings.defaults.layout; saved layouts pick it up
+// as its own pill.
 Singleton {
     readonly property int height: 30
     // pills sit this far off the bar's top and bottom edges; their hover/click areas reach
@@ -42,17 +40,6 @@ Singleton {
         onLoadFailed: loaded = true   // first run: no file yet
     }
 
-    readonly property var left: [
-        { shape: "right", padL: 4, padR: 4, modules: ["SysStats"] },
-        { padL: 4, modules: ["Workspaces"] },
-        { padL: 0, padR: 0, modules: ["Media"] },
-    ]
-    readonly property var center: [
-        { shape: "down", modules: ["Idle", "Clock", "Dnd"] },
-    ]
-    readonly property var right: [
-        { modules: ["Network", "Privacy", "Tray", "Battery"] },
-        { modules: ["Taskbar"] },
-        { shape: "left", modules: ["Backlight", "Volume"] },
-    ]
+    // [left, right] inner padding (px) for modules that want other than 6 at a pill's edge
+    readonly property var pads: ({ SysStats: [4, 4], Workspaces: [4, 6], Media: [0, 0] })
 }

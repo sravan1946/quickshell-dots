@@ -149,13 +149,15 @@ Singleton {
         return sum > 0 ? at / sum / 15 : 0
     }
     // timbre -> colour, kept to the cover's main colour (Player.c1): a typical kick (~0.17) is
-    // that colour; deeper ones lean darker and up to 0.12 (~43°) round the hue one way, clickier
+    // that colour; deeper ones lean darker and round the hue one way, clickier
     // ones lighter and the other way. A greyscale cover keeps its (lack of) saturation.
+    // (Settings.kickTimbre, kickHue in degrees, kickLight)
     function kickColor(c) {
         const b = Player.c1
+        if (!Settings.kickTimbre) return b
         const x = Math.max(-1, Math.min(1, (c - 0.17) / 0.2))   // -1 deep .. 0 typical .. 1 clicky
-        const l = Math.max(0.3, Math.min(0.85, b.hslLightness + 0.14 * x))
-        return Qt.hsla((Math.max(0, b.hslHue) + 0.12 * x + 1) % 1, b.hslSaturation, l, 1)
+        const l = Math.max(0.3, Math.min(0.85, b.hslLightness + Settings.kickLight * x))
+        return Qt.hsla((Math.max(0, b.hslHue) + Settings.kickHue / 360 * x + 1) % 1, b.hslSaturation, l, 1)
     }
 
     function record(d, thr, sd, hit) {

@@ -15,13 +15,15 @@ Mod {
 
     property bool alt: false
 
-    // minute ticks: nothing shown has seconds
+    // minute ticks for everything (calendar, events, Join); only the label takes seconds, from
+    // its own clock that idles at minutes while they're off
     SystemClock { id: sys; precision: SystemClock.Minutes }
     readonly property date now: sys.date
+    SystemClock { id: secs; precision: Settings.clockSeconds ? SystemClock.Seconds : SystemClock.Hours }
 
     text: alt
         ? Qt.formatDateTime(now, "HH:mm") + " " + Theme.g(0xF00ED) + " " + Qt.formatDateTime(now, "dd·MM·yy")
-        : Qt.formatDateTime(now, Settings.clock24h ? "HH:mm" : "hh:mm AP")
+        : Qt.formatDateTime(Settings.clockSeconds ? secs.date : now, (Settings.clock24h ? "HH:mm" : "hh:mm") + (Settings.clockSeconds ? ":ss" : "") + (Settings.clock24h ? "" : " AP"))
     tip: panel.visible ? "" : Qt.formatDate(now, "dddd, d MMMM yyyy")
         + (Cal.next ? `<br><font color="${Theme.actFg}">${Theme.g(0xF00F0)} ${nextText(Cal.next)}</font>` : "")
         + "<br>Click: calendar · Right-click: format"
@@ -92,7 +94,7 @@ Mod {
         Column {
             id: cal
             readonly property int cell: 36
-            readonly property int first: Qt.locale().firstDayOfWeek % 7   // 0 = Sunday
+            readonly property int first: [Qt.locale().firstDayOfWeek % 7, 1, 0][Settings.weekStart]   // 0 = Sunday
             property int shift: 0
             property date selected: clock.now
             readonly property date month: new Date(clock.now.getFullYear(), clock.now.getMonth() + shift, 1)
@@ -278,10 +280,10 @@ Mod {
                                 font { family: Theme.font; pixelSize: 10 }
                             }
                             // Google Meet, in the calendar's account (gcal.py adds authuser); solid
-                            // from 10 minutes before it starts until it ends
+                            // from Settings.meetLead minutes before it starts until it ends
                             Rectangle {
                                 id: join
-                                readonly property bool soon: new Date(ev.e.start) - clock.now <= 600000
+                                readonly property bool soon: new Date(ev.e.start) - clock.now <= Settings.meetLead * 60000
                                 visible: !!ev.e.meet && !ev.past
                                 implicitWidth: joinRow.implicitWidth + 14
                                 implicitHeight: 20

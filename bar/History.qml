@@ -4,12 +4,12 @@ import Quickshell
 import Quickshell.Io
 
 // Every notification the daemon receives, newest first, kept across restarts.
-// ponytail: rewrites the whole file per change (max 100 small entries), fine until it isn't
+// ponytail: rewrites the whole file per change (Settings.historyMax small entries), fine until it isn't
 Singleton {
     id: root
 
     readonly property alias entries: model
-    readonly property int max: 100
+    readonly property int max: Settings.historyMax
 
     ListModel { id: model }
 

@@ -47,9 +47,9 @@ PanelWindow {
     }
 
     // HyDE margins: .modules-left 0, .modules-right 0.2em margin + 0.2em padding
-    Section { groups: Config.left; anchors.left: parent.left }
-    Section { groups: Config.center; anchors.horizontalCenter: parent.horizontalCenter }
-    Section { groups: Config.right; anchors.right: parent.right; anchors.rightMargin: 4 }
+    Section { side: "left"; anchors.left: parent.left }
+    Section { side: "center"; anchors.horizontalCenter: parent.horizontalCenter }
+    Section { side: "right"; anchors.right: parent.right; anchors.rightMargin: 4 }
 
     Tooltip { screen: modelData }
 }

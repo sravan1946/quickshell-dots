@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Synced lyrics for Lyrics.qml: lyrics.py ARTIST TITLE ALBUM DURATION_S
+"""Synced lyrics for Lyrics.qml: lyrics.py ARTIST TITLE ALBUM DURATION_S [--no-musixmatch]
 Prints [{"t": seconds, "text": line, "sub": backing vocals}, ...], or [] when nothing synced
 was found. Backing vocals are the line's (parenthesised) parts, shown smaller under it.
 
@@ -158,7 +158,7 @@ if __name__ == "__main__":
         sys.exit(0)
     artist, title, album, dur = (sys.argv[1:] + [""] * 4)[:4]
     try:
-        words, lines = musixmatch(artist, title, album, dur)
+        words, lines = ([], []) if "--no-musixmatch" in sys.argv[5:] else musixmatch(artist, title, album, dur)
     except Exception as e:   # Musixmatch is the flaky one: never let it take lrclib down too
         print(f"lyrics: musixmatch failed: {e!r}", file=sys.stderr)
         words, lines = [], []

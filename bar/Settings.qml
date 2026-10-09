@@ -25,9 +25,19 @@ Singleton {
         themeHvrFg: "@wb-hvr-fg",
         themeMenuFg: "@gtk-fg",
 
-        // bar
-        hiddenModules: [],     // module file names (Config.qml) left out of the bar
+        // bar: pills per side, each a list of module file names (modules/); the pills' shapes
+        // and padding follow from where they sit (components/Section.qml)
+        layout: {
+            left: [["SysStats"], ["Workspaces"], ["Media"]],
+            center: [["Idle", "Clock", "Dnd"]],
+            right: [["Network", "Privacy", "Tray", "Battery"], ["Taskbar"], ["Backlight", "Volume"]],
+        },
+        hiddenModules: [],     // module file names left out of the bar
         clock24h: false,
+        clockSeconds: false,   // ticks the bar every second instead of every minute
+        weekStart: 0,          // calendar's first column: 0 locale, 1 Monday, 2 Sunday
+        calRefresh: 10,        // min between calendar fetches (opening it always fetches)
+        tipDelay: 400,         // ms the pointer rests on a module before its tooltip
 
         // system stats pill
         sysInterval: 2000,     // ms between samples
@@ -39,6 +49,7 @@ Singleton {
         // network pill graph
         netColDown: "#99ffdd",
         netColUp: "#ffcc66",
+        netInterval: 2000,     // ms between samples
 
         // beat wave every rim/edge effect rides: how far (px) and how long (s)
         beatEffects: true,     // off: no beat wave, pill rims, window-border glow or sparks
@@ -53,6 +64,17 @@ Singleton {
         // synced lyrics from lrclib.net under the artist in the Now Playing panel
         lyrics: true,
         lyricsOffset: 0,       // s, + shows lines earlier
+        lyricsByWord: true,    // word-timed lyrics fill in word by word (off: whole lines)
+        lyricsMusixmatch: true, // ask Musixmatch (word timing) as well as lrclib (lines only)
+
+        // kick colours (Visualizer.kickColor): off, every kick is the cover colour; on, its sound
+        // shifts the hue up to kickHue degrees and the lightness up to kickLight either way
+        kickTimbre: true,
+        kickHue: 43,
+        kickLight: 0.14,
+
+        // calendar: the Join pill turns solid this many minutes before a meeting
+        meetLead: 10,
 
         // now playing pill backdrop: 0 columns, 1 ambient field, 2 mini EQ, 3 spectrum strip,
         // 4 waveform tail (shaders/pill.frag `style`)
@@ -76,6 +98,7 @@ Singleton {
 
         // notifications: popup lifetime when one asks for the server default
         notifTimeout: 6000,
+        historyMax: 100,       // notifications kept in the history panel
 
         // battery, while discharging: amber below `warn`, red and one notification below `low`
         batteryWarn: 20,
@@ -91,8 +114,13 @@ Singleton {
     property string themeHvrBg:    defaults.themeHvrBg
     property string themeHvrFg:    defaults.themeHvrFg
     property string themeMenuFg:   defaults.themeMenuFg
+    property var    layout:        defaults.layout
     property var    hiddenModules: defaults.hiddenModules
     property bool   clock24h:      defaults.clock24h
+    property bool   clockSeconds:  defaults.clockSeconds
+    property int    weekStart:     defaults.weekStart
+    property int    calRefresh:    defaults.calRefresh
+    property int    tipDelay:      defaults.tipDelay
     property int    sysInterval:   defaults.sysInterval
     property string sysColCpu:     defaults.sysColCpu
     property string sysColRam:     defaults.sysColRam
@@ -100,6 +128,7 @@ Singleton {
     property bool   numberRoll:    defaults.numberRoll
     property string netColDown:    defaults.netColDown
     property string netColUp:      defaults.netColUp
+    property int    netInterval:   defaults.netInterval
     property bool   beatEffects:   defaults.beatEffects
     property real   waveReach:     defaults.waveReach
     property real   waveDur:       defaults.waveDur
@@ -108,6 +137,12 @@ Singleton {
     property real   beatGap:       defaults.beatGap
     property bool   lyrics:        defaults.lyrics
     property real   lyricsOffset:  defaults.lyricsOffset
+    property bool   lyricsByWord:  defaults.lyricsByWord
+    property bool   lyricsMusixmatch: defaults.lyricsMusixmatch
+    property bool   kickTimbre:    defaults.kickTimbre
+    property real   kickHue:       defaults.kickHue
+    property real   kickLight:     defaults.kickLight
+    property int    meetLead:      defaults.meetLead
     property int    mediaStyle:    defaults.mediaStyle
     property int    panelLayout:   defaults.panelLayout
     property int    panelStyle:    defaults.panelStyle
@@ -118,8 +153,40 @@ Singleton {
     property int    osdTimeout:    defaults.osdTimeout
     property int    osdArmDelay:   defaults.osdArmDelay
     property int    notifTimeout:  defaults.notifTimeout
+    property int    historyMax:    defaults.historyMax
     property int    batteryWarn:   defaults.batteryWarn
     property int    batteryLow:    defaults.batteryLow
+
+    // `layout` as saved, minus modules that no longer exist, plus ones added since it was
+    // saved (each as its own pill at the end of its default side)
+    readonly property var barLayout: {
+        const sides = ["left", "center", "right"]
+        const all = s => [].concat(...s)
+        const known = all(sides.map(s => all(defaults.layout[s])))
+        const out = {}
+        for (const s of sides)
+            out[s] = (layout[s] ?? []).map(p => p.filter(m => known.includes(m))).filter(p => p.length)
+        const placed = all(sides.map(s => all(out[s])))
+        for (const s of sides)
+            for (const m of all(defaults.layout[s])) if (!placed.includes(m)) out[s].push([m])
+        return out
+    }
+    // dir -1/1: one place along the bar, stepping across pill and side boundaries as it
+    // goes (a pill left empty disappears); 0: split it off into its own pill
+    function moveModule(name, dir) {
+        const t = []   // modules, "|" after each pill, "~" between sides
+        for (const s of ["left", "center", "right"]) {
+            if (t.length) t.push("~")
+            for (const p of barLayout[s]) t.push(...p, "|")
+        }
+        const i = t.indexOf(name)
+        if (i < 0) return
+        if (dir === 0) t.splice(i, 1, "|", name, "|")
+        else if (i + dir >= 0 && i + dir < t.length) [t[i], t[i + dir]] = [t[i + dir], t[i]]
+        const pills = s => s.split("|").map(p => p.trim().split(/\s+/).filter(m => m)).filter(p => p.length)
+        const [l, c, r] = t.join(" ").split("~").map(pills)
+        layout = { left: l, center: c, right: r }
+    }
 
     function moduleShown(name) { return !hiddenModules.includes(name) }
     function setModuleShown(name, on) {
