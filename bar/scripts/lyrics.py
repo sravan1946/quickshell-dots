@@ -69,6 +69,7 @@ def mxm_token(renew=False):
     r = get(MXM + "token.get", {"app_id": "mac-ios-v2.0"}, MXM_HEADERS)
     tok = ((r or {}).get("message", {}).get("body") or {}).get("user_token")
     if tok:   # a captcha answer leaves the old (dead) one in place rather than nothing
+        os.makedirs(os.path.dirname(TOKEN_FILE), exist_ok=True)
         with open(TOKEN_FILE, "w") as f:
             f.write(tok)
     return tok
@@ -156,5 +157,9 @@ if __name__ == "__main__":
         demo()
         sys.exit(0)
     artist, title, album, dur = (sys.argv[1:] + [""] * 4)[:4]
-    words, lines = musixmatch(artist, title, album, dur)
+    try:
+        words, lines = musixmatch(artist, title, album, dur)
+    except Exception as e:   # Musixmatch is the flaky one: never let it take lrclib down too
+        print(f"lyrics: musixmatch failed: {e!r}", file=sys.stderr)
+        words, lines = [], []
     print(json.dumps(words or [split(l) for l in lrclib(artist, title, album, dur)] or lines))
