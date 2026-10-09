@@ -57,9 +57,9 @@ Singleton {
         waveDur: 1.0,
         // beat detector (Visualizer.detect): a kick is a bass rise above the recent mean +
         // beatSens × sd + beatFloor, at least beatGap s after the last
-        beatSens: 0.5,
-        beatFloor: 0.01,
-        beatGap: 0.2,
+        beatSens: 0,           // tuned by scripts/kicktune.py on 19 tracks (2026-10-09)
+        beatFloor: 0.02,
+        beatGap: 0.23,
 
         // synced lyrics from lrclib.net under the artist in the Now Playing panel
         lyrics: true,

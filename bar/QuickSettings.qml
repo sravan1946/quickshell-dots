@@ -99,6 +99,7 @@ Scope {
     }
 
     onOpenChanged: {
+        if (open) Update.stale()
         Config.quickOpen = open
         if (open) {
             NetStats.refresh()
@@ -265,6 +266,35 @@ Scope {
                     IconButton { icon: 0xF0493; onClicked: { root.open = false; Config.openSettings() } }   // cog
                     IconButton { icon: 0xF0341; onClicked: root.launch("hyde-shell lockscreen.sh") }       // lock
                     IconButton { icon: 0xF0425; onClicked: { root.open = false; Config.togglePower() } }   // power menu
+                }
+
+                // the bar's code is behind GitHub (Update.qml)
+                RowLayout {
+                    visible: Update.behind > 0
+                    Layout.fillWidth: true
+                    spacing: 10
+                    T { text: Theme.g(0xF06B0); color: Theme.actBg; font.pixelSize: 18 }   // update
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 0
+                        T {
+                            text: Update.behind === 1 ? "1 update on GitHub" : `${Update.behind} updates on GitHub`
+                            font.bold: true
+                        }
+                        T {
+                            Layout.fillWidth: true
+                            text: Update.error || (Update.subjects[0] ?? "")
+                            color: Update.error ? "#e06c75" : Theme.mainFg
+                            opacity: Update.error ? 1 : 0.6
+                            elide: Text.ElideRight
+                            font.pixelSize: 11
+                        }
+                    }
+                    PillButton {
+                        implicitHeight: 24
+                        text: Update.busy ? "Updating…" : "Update"
+                        onClicked: Update.pull()
+                    }
                 }
 
                 GridLayout {

@@ -104,9 +104,9 @@ Singleton {
     // sections the bass sits high and only dips between kicks, in sparse ones it swells
     // slowly, and a level threshold misfires on both. The rise is taken over two frames,
     // since cava's smoothing spreads a kick across them. It beats when it clears the recent
-    // mean + beatSens sd (~3 s EMA) plus beatFloor, at most every beatGap s (Settings).
+    // mean + beatSens sd (~9 s EMA) plus beatFloor, at most every beatGap s (Settings).
     // Strength is the rise against the biggest recent one.
-    // Defaults tuned offline on recorded cava frames (30 fps, noise_reduction 77).
+    // Defaults tuned by scripts/kicktune.py against kicks heard in the raw audio (30 fps cava, noise_reduction 77).
     function detect(b) {
         const d = Math.max(0, b - prevBass2)
         prevBass2 = prevBass
@@ -132,8 +132,8 @@ Singleton {
             }
         }
         riseMax = Math.max(0.05, riseMax * 0.997)
-        riseMean += (d - riseMean) / 90
-        riseVar += ((d - riseMean) * (d - riseMean) - riseVar) / 90
+        riseMean += (d - riseMean) / 270
+        riseVar += ((d - riseMean) * (d - riseMean) - riseVar) / 270
     }
 
     // What a kick sounded like, 0 (all sub) .. 1 (all treble): where in the spectrum its
