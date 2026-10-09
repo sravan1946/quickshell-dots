@@ -28,10 +28,13 @@ PanelWindow {
         readonly property real ox: beatX
         readonly property vector4d fronts: Visualizer.waveFronts
         readonly property vector4d fades: Visualizer.waveFades
-        readonly property color c1: Player.c1
-        readonly property color c2: Player.c2
+        readonly property real reach: Visualizer.waveReach
+        readonly property real dur: Visualizer.waveDur
+        readonly property vector4d kr: Visualizer.beatR
+        readonly property vector4d kg: Visualizer.beatG
+        readonly property vector4d kb: Visualizer.beatB
         // Qt caches shaders by URL across reloads: bump ?v= after shaders/build.sh
-        fragmentShader: Qt.resolvedUrl("shaders/bar.frag.qsb?v=4")
+        fragmentShader: Qt.resolvedUrl("shaders/bar.frag.qsb?v=11")
     }
 
     // a click on the bar's empty space closes any open click popup (a module's own click

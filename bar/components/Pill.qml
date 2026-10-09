@@ -56,8 +56,10 @@ Rectangle {
         readonly property vector4d punches: Visualizer.beatPows
         readonly property real dur: Visualizer.waveDur
         readonly property real reach: Visualizer.waveReach
-        readonly property color c1: Player.c1
+        readonly property vector4d kr: Visualizer.beatR
+        readonly property vector4d kg: Visualizer.beatG
+        readonly property vector4d kb: Visualizer.beatB
         // Qt caches shaders by URL across reloads: bump ?v= after shaders/build.sh
-        fragmentShader: Qt.resolvedUrl("../shaders/rim.frag.qsb?v=3")
+        fragmentShader: Qt.resolvedUrl("../shaders/rim.frag.qsb?v=6")
     }
 }

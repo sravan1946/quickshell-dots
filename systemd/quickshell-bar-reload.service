@@ -1,0 +1,10 @@
+[Unit]
+Description=Reload the Quickshell bar (triggered by quickshell-bar-reload.path)
+# edits come in bursts (a save is a temp file plus a rename; shaders/build.sh writes six files)
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+# settle, reload over IPC (retrying while the bar isn't ready), restart if a new inline component
+# needs it: see the script
+ExecStart=%h/dev/quickshell/systemd/quickshell-bar-reload.sh

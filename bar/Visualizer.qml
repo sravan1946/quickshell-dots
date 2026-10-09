@@ -18,11 +18,30 @@ Singleton {
     property bool active: false   // frames are arriving
     property real bass: 0         // 0..1, the four middle (lowest) bands
     property int peakUsers: 0
+    // The detector's working, for the live scope on Settings' Media page: the last 5 s of
+    // frames (rise, the threshold it had to clear, and 1 beat / 2 over it but held back by the
+    // min gap / 0 neither), the threshold's parts now, and the tempo the beats imply. Only
+    // recorded while scopeUsers > 0; `scoped` fires per recorded frame.
+    property int scopeUsers: 0
+    property var scopeRise: []
+    property var scopeThr: []
+    property var scopeHit: []
+    property var scopeBeats: []   // `t`s of the beats in the last 8 s
+    property real scopeMean: 0
+    property real scopeSd: 0
+    property real scopeBpm: 0
+    signal scoped()
     property double beatAt: -10   // `t` of the latest beat
     property real beatStrength: 0 // 0..1, how hard it hit relative to recent kicks
     // the last four beats, newest in x: their `t`s and strengths (for overlapping effects)
     property vector4d beatAts: Qt.vector4d(-10, -10, -10, -10)
     property vector4d beatPows: zero
+    // ...and their colours, one channel per vec4 (newest in x), from what each kick sounded
+    // like (timbre(), kickColor()); beatCol is the newest one's
+    property vector4d beatR: zero
+    property vector4d beatG: zero
+    property vector4d beatB: zero
+    property color beatCol: "white"
     // s since the shell started, time of the latest frame: a clock that ticks only while
     // frames arrive. Kept small: beat times also travel in vec4s, which are 32-bit floats
     // (epoch seconds would round to the nearest 128 s there).
@@ -58,6 +77,8 @@ Singleton {
     // working state, mutated in place (nothing binds to it)
     property var lv: new Array(32).fill(0)
     property var pk: new Array(32).fill(0)
+    property var pv1: new Array(32).fill(0)   // last frame's levels
+    property var pv2: new Array(32).fill(0)   // the frame before (the detector's rise runs over two)
     // onset detector state
     property real prevBass: 0    // last frame's
     property real prevBass2: 0   // the frame before
@@ -75,6 +96,7 @@ Singleton {
         beatStrength = 0
         beatAts = Qt.vector4d(-10, -10, -10, -10)
         beatPows = zero
+        beatR = beatG = beatB = zero
         prevBass = prevBass2 = 0
     }
 
@@ -90,7 +112,10 @@ Singleton {
         prevBass2 = prevBass
         prevBass = b
         const sd = Math.sqrt(riseVar)
-        if (d > riseMean + Settings.beatSens * sd + Settings.beatFloor && t - beatAt >= Settings.beatGap) {
+        const thr = riseMean + Settings.beatSens * sd + Settings.beatFloor
+        const over = d > thr, open = t - beatAt >= Settings.beatGap
+        if (scopeUsers > 0) record(d, thr, sd, over ? (open && Settings.beatEffects ? 1 : 2) : 0)
+        if (over && open) {
             riseMax = Math.max(riseMax, d)
             const s = Math.min(1, d / riseMax)
             if (Settings.beatEffects) {
@@ -98,12 +123,55 @@ Singleton {
                 beatStrength = s
                 beatAts = Qt.vector4d(t, beatAts.x, beatAts.y, beatAts.z)
                 beatPows = Qt.vector4d(s, beatPows.x, beatPows.y, beatPows.z)
+                const k = kickColor(timbre())
+                beatCol = k
+                beatR = Qt.vector4d(k.r, beatR.x, beatR.y, beatR.z)
+                beatG = Qt.vector4d(k.g, beatG.x, beatG.y, beatG.z)
+                beatB = Qt.vector4d(k.b, beatB.x, beatB.y, beatB.z)
                 beat(s)
             }
         }
         riseMax = Math.max(0.05, riseMax * 0.997)
         riseMean += (d - riseMean) / 90
         riseVar += ((d - riseMean) * (d - riseMean) - riseVar) / 90
+    }
+
+    // What a kick sounded like, 0 (all sub) .. 1 (all treble): where in the spectrum its
+    // sudden energy landed, the centroid of each band's rise over the detector's two frames,
+    // L and R folded together. Measured on real kicks (cava, monstercat on): a typical
+    // kick drum lands 0.12-0.17, clicky or snare-ish hits up to ~0.55.
+    function timbre() {
+        let sum = 0, at = 0
+        for (let k = 0; k < 16; k++) {   // k: 0 bass .. 15 treble
+            const r = Math.max(0, (lv[15 - k] + lv[16 + k] - pv2[15 - k] - pv2[16 + k]) / 2)
+            sum += r; at += k * r
+        }
+        return sum > 0 ? at / sum / 15 : 0
+    }
+    // timbre -> colour, kept to the cover's main colour (Player.c1): a typical kick (~0.17) is
+    // that colour; deeper ones lean darker and up to 0.12 (~43°) round the hue one way, clickier
+    // ones lighter and the other way. A greyscale cover keeps its (lack of) saturation.
+    function kickColor(c) {
+        const b = Player.c1
+        const x = Math.max(-1, Math.min(1, (c - 0.17) / 0.2))   // -1 deep .. 0 typical .. 1 clicky
+        const l = Math.max(0.3, Math.min(0.85, b.hslLightness + 0.14 * x))
+        return Qt.hsla((Math.max(0, b.hslHue) + 0.12 * x + 1) % 1, b.hslSaturation, l, 1)
+    }
+
+    function record(d, thr, sd, hit) {
+        const push = (a, v) => { a.push(v); if (a.length > 150) a.shift() }   // 5 s at 30 fps
+        push(scopeRise, d); push(scopeThr, thr); push(scopeHit, hit)
+        scopeMean = riseMean
+        scopeSd = sd
+        if (hit === 1) scopeBeats.push(t)
+        while (scopeBeats.length && t - scopeBeats[0] > 8) scopeBeats.shift()
+        // tempo: the median gap between recent beats, folded into 70..180 BPM
+        const gaps = scopeBeats.slice(1).map((b, i) => b - scopeBeats[i]).sort((a, b) => a - b)
+        let bpm = gaps.length >= 3 ? 60 / gaps[gaps.length >> 1] : 0
+        while (bpm > 0 && bpm < 70) bpm *= 2
+        while (bpm > 180) bpm /= 2
+        scopeBpm = bpm
+        scoped()
     }
 
     function publish() {
@@ -149,6 +217,10 @@ Singleton {
 
                 viz.bass = (lv[14] + lv[15] + lv[16] + lv[17]) / 4
                 viz.detect((lv[13] + lv[14] + lv[15] + lv[16] + lv[17] + lv[18]) / 6)
+                const old = viz.pv2   // recycle: pv2 <- pv1 <- this frame
+                viz.pv2 = viz.pv1
+                for (let k = 0; k < 32; k++) old[k] = lv[k]
+                viz.pv1 = old
             }
         }
     }

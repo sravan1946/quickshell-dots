@@ -1,0 +1,17 @@
+[Unit]
+Description=Reload the Quickshell bar when its config changes
+PartOf=quickshell-bar.service
+After=quickshell-bar.service
+
+# Watches the folders, not the files: a save that renames a new file over the old one (sed -i,
+# most editors) keeps working, where Quickshell's own per-file watcher lost the file and missed
+# every other such save (it's switched off in shell.qml). Not recursive: one line per folder.
+[Path]
+PathChanged=%h/dev/quickshell/bar
+PathChanged=%h/dev/quickshell/bar/components
+PathChanged=%h/dev/quickshell/bar/modules
+PathChanged=%h/dev/quickshell/bar/shaders
+Unit=quickshell-bar-reload.service
+
+[Install]
+WantedBy=quickshell-bar.service

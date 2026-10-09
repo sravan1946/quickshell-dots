@@ -3,14 +3,14 @@ import Quickshell
 import Quickshell.Io
 
 // Hands each kick to the beatglow Hyprland plugin (~/.config/hypr/plugins/beatglow), which runs
-// the bar's beat wave round the focused window's border: strength, the wave's timing, the cover
-// colours and where each screen's wave starts. One message per kick; the plugin animates on its
+// the bar's beat wave round the focused window's border: strength, the wave's timing, the kick's
+// colour (Visualizer.kickColor) and where each screen's wave starts. One message per kick; the plugin animates on its
 // own clock. Without the plugin Hyprland just answers "unknown request".
 Scope {
     Connections {
         target: Visualizer
         function onBeat(s) {
-            const c1 = Player.c1, c2 = Player.c2, o = Visualizer.origins
+            const c1 = Visualizer.beatCol, c2 = Qt.darker(Visualizer.beatCol, 1.8), o = Visualizer.origins   // the kick's own colour
             const f = v => v.toFixed(3)
             sock.next = ["beatglow", "beat", f(s), Visualizer.waveDur, Visualizer.waveReach,
                          f(c1.r), f(c1.g), f(c1.b), f(c2.r), f(c2.g), f(c2.b),

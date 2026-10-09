@@ -8,10 +8,15 @@ import Quickshell.Services.UPower
 
 ShellRoot {
     // qs -c bar ipc call bar toggle   (replaces `waybar.py --hide`)
+    // qs -c bar ipc call bar reload   (what systemd/quickshell-bar-reload.path runs on edits)
     IpcHandler {
         target: "bar"
         function toggle(): void { Config.barVisible = !Config.barVisible }
+        function reload(): void { Quickshell.reload(false) }
     }
+    // Quickshell's own watcher misses every other save made by renaming a new file over the
+    // old one (sed -i, most editors): reloads come from quickshell-bar-reload.path instead
+    Component.onCompleted: Quickshell.watchFiles = false
 
     Notifications {}
     Osd {}

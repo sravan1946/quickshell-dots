@@ -16,7 +16,7 @@ layout(std140, binding = 0) uniform buf {
     vec4 punches;    // their strengths, 0..1
     float dur;       // the wave's run (Visualizer.waveDur, waveReach)
     float reach;
-    vec4 c1;
+    vec4 kr; vec4 kg; vec4 kb;   // each beat's colour (Visualizer.kickColor), one channel per vec4
 };
 
 // rounded box with per-corner radii (y down, so +y is the bottom)
@@ -38,10 +38,12 @@ void main() {
     vec2 px = qt_TexCoord0 * res;
     float sd = sdBox(px - res * 0.5, res * 0.5, radii);
     float d = abs(px.x - ox);
-    float h = min(1.0, hit(d, ages.x, punches.x) + hit(d, ages.y, punches.y)
-                     + hit(d, ages.z, punches.z) + hit(d, ages.w, punches.w));
+    vec4 hs = vec4(hit(d, ages.x, punches.x), hit(d, ages.y, punches.y), hit(d, ages.z, punches.z), hit(d, ages.w, punches.w));
+    float sum = hs.x + hs.y + hs.z + hs.w;
+    float h = min(1.0, sum);
+    vec3 kc = vec3(dot(hs, kr), dot(hs, kg), dot(hs, kb)) / max(sum, 1e-4);   // the beats lighting it, blended
     float rim = smoothstep(1.5, 0.0, abs(sd + 0.75));
     float inner = exp(sd / 5.0) * step(sd, 0.0) * 0.18;
     float a = 0.65 * h * (rim * 0.85 + inner) * smoothstep(0.6, -0.6, sd);
-    fragColor = vec4(mix(c1.rgb, vec3(1.0), 0.3 * h) * a, a) * qt_Opacity;
+    fragColor = vec4(mix(kc, vec3(1.0), 0.3 * h) * a, a) * qt_Opacity;
 }

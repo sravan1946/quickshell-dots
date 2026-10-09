@@ -391,6 +391,7 @@ Scope {
                 onEdited: v => Settings.waveDur = v
             }
             SectionHeader { text: "Beat detection" }
+            BeatScope { visible: Settings.beatEffects }
             Hint { text: "A kick is a bass rise that stands out from the last few seconds. Lower sensitivity and floor catch more (and more false) beats." }
             SettingSlider {
                 enabled: Settings.beatEffects
@@ -549,6 +550,106 @@ Scope {
             Layout.fillWidth: true
             implicitHeight: 1
             color: Qt.alpha(Theme.mainFg, 0.18)
+        }
+    }
+
+    // The beat detector live (Visualizer's scope): the last 5 s of bass rise against the
+    // threshold it has to clear, with each beat it fired, rises it held back for the min gap,
+    // and the gap after each beat shaded. Repaints per cava frame, only while this page is up.
+    component BeatScope: ColumnLayout {
+        id: bs
+        Layout.fillWidth: true
+        spacing: 6
+        Component.onCompleted: Visualizer.scopeUsers++
+        Component.onDestruction: Visualizer.scopeUsers--
+        readonly property color riseCol: Theme.mainFg
+        readonly property color thrCol: "#e0af68"
+        readonly property color beatCol: Player.c1
+        readonly property color heldCol: "#f7768e"
+
+        Rectangle {
+            Layout.fillWidth: true
+            implicitHeight: 90
+            radius: 10
+            color: Qt.alpha(Theme.mainFg, 0.05)
+            border.color: Qt.alpha(Theme.mainFg, 0.1)
+            Text {
+                anchors.centerIn: parent
+                visible: !Visualizer.active
+                text: "Play something to see the detector work"
+                color: Theme.mainFg
+                opacity: 0.4
+                font { family: Theme.font; pixelSize: 11 }
+            }
+            Canvas {
+                id: scope
+                anchors { fill: parent; margins: 6 }
+                Connections { target: Visualizer; function onScoped() { scope.requestPaint() } }
+                onPaint: {
+                    const ctx = getContext("2d")
+                    ctx.reset()
+                    const R = Visualizer.scopeRise, T = Visualizer.scopeThr, H = Visualizer.scopeHit
+                    if (!R.length) return
+                    const n = 150, w = width / (n - 1), off = n - R.length
+                    const top = Math.max(0.05, ...R, ...T) * 1.1
+                    const X = i => (i + off) * w, Y = v => height - v / top * height
+                    // after each beat, the min gap: kicks in here are held back
+                    ctx.fillStyle = Qt.alpha(bs.riseCol, 0.07)
+                    const gw = Settings.beatGap * 30 * w
+                    for (let i = 0; i < H.length; i++) if (H[i] === 1) ctx.fillRect(X(i), 0, gw, height)
+                    // the rise, filled
+                    ctx.beginPath(); ctx.moveTo(X(0), height)
+                    for (let i = 0; i < R.length; i++) ctx.lineTo(X(i), Y(R[i]))
+                    ctx.lineTo(X(R.length - 1), height); ctx.closePath()
+                    ctx.fillStyle = Qt.alpha(bs.riseCol, 0.22); ctx.fill()
+                    ctx.beginPath()
+                    for (let i = 0; i < R.length; i++) ctx.lineTo(X(i), Y(R[i]))
+                    ctx.strokeStyle = Qt.alpha(bs.riseCol, 0.7); ctx.lineWidth = 1.2; ctx.stroke()
+                    // the threshold
+                    ctx.beginPath()
+                    for (let i = 0; i < T.length; i++) ctx.lineTo(X(i), Y(T[i]))
+                    ctx.strokeStyle = bs.thrCol; ctx.lineWidth = 1.5; ctx.stroke()
+                    // beats fired, and rises over the threshold held back by the gap
+                    for (let i = 0; i < H.length; i++) {
+                        if (!H[i]) continue
+                        ctx.fillStyle = H[i] === 1 ? bs.beatCol : bs.heldCol
+                        if (H[i] === 1) ctx.fillRect(X(i) - 1, 0, 2, height)
+                        else ctx.fillRect(X(i) - 2, Y(R[i]) - 2, 4, 4)
+                    }
+                }
+            }
+        }
+        // what the threshold is made of right now, and the tempo the beats imply
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 12
+            Repeater {
+                model: [[bs.riseCol, "rise"], [bs.thrCol, "threshold"], [bs.beatCol, "beat"], [bs.heldCol, "held by gap"]]
+                Row {
+                    required property var modelData
+                    spacing: 5
+                    Rectangle { width: 8; height: 8; radius: 4; color: parent.modelData[0]; anchors.verticalCenter: parent.verticalCenter }
+                    Text { text: parent.modelData[1]; color: Theme.mainFg; opacity: 0.6; font { family: Theme.font; pixelSize: 10 } }
+                }
+            }
+            Item { Layout.fillWidth: true }
+            Text {
+                text: Visualizer.scopeBpm > 0 ? `≈ ${Math.round(Visualizer.scopeBpm)} BPM` : ""
+                color: Theme.actFg
+                font { family: Theme.font; pixelSize: 11; bold: true }
+            }
+        }
+        Text {
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            color: Theme.mainFg
+            opacity: 0.55
+            font { family: Theme.font; pixelSize: 10 }
+            text: {
+                const m = Visualizer.scopeMean, sd = Visualizer.scopeSd
+                const f = v => v.toFixed(3)
+                return `threshold ${f(m + Settings.beatSens * sd + Settings.beatFloor)} = mean ${f(m)} + ${Settings.beatSens.toFixed(2)} × sd ${f(sd)} + floor ${f(Settings.beatFloor)}`
+            }
         }
     }
 

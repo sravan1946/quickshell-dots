@@ -98,6 +98,9 @@ Item {
             readonly property color c1: Player.c1
             readonly property color c2: Player.c2
             readonly property color c3: Player.c3
+            readonly property vector4d kr: Visualizer.beatR
+            readonly property vector4d kg: Visualizer.beatG
+            readonly property vector4d kb: Visualizer.beatB
             readonly property vector4d l0: Visualizer.l0
             readonly property vector4d l1: Visualizer.l1
             readonly property vector4d l2: Visualizer.l2
@@ -107,7 +110,7 @@ Item {
             readonly property vector4d l6: Visualizer.l6
             readonly property vector4d l7: Visualizer.l7
             // Qt caches shaders by URL across reloads: bump ?v= after shaders/build.sh
-            fragmentShader: Qt.resolvedUrl("../shaders/pill.frag.qsb?v=21")
+            fragmentShader: Qt.resolvedUrl("../shaders/pill.frag.qsb?v=24")
         }
 
         // cover: a tinted glow behind it breathes with the bass

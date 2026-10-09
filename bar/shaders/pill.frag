@@ -27,6 +27,7 @@ layout(std140, binding = 0) uniform buf {
     float glow;      // 0..1, overall strength (dims while paused)
     vec4 bg;         // pill colour
     vec4 c1; vec4 c2; vec4 c3;
+    vec4 kr; vec4 kg; vec4 kb;   // each beat's colour (Visualizer.kickColor), one channel per vec4
     vec4 l0; vec4 l1; vec4 l2; vec4 l3; vec4 l4; vec4 l5; vec4 l6; vec4 l7;
 };
 
@@ -211,7 +212,9 @@ void main() {
     float heads = min(1.0, b0.y + b1.y + b2.y + b3.y);
     float rim = smoothstep(1.5, 0.0, abs(sd + 0.75));
     float ra = rim * lit * 0.85;
-    c = over(vec4(mix(c1.rgb, vec3(1.0), 0.25 * heads) * ra, ra), c);
+    vec4 bs = vec4(b0.x, b1.x, b2.x, b3.x);
+    vec3 kc = vec3(dot(bs, kr), dot(bs, kg), dot(bs, kb)) / max(bs.x + bs.y + bs.z + bs.w, 1e-4);   // the beats lighting it, blended
+    c = over(vec4(mix(kc, vec3(1.0), 0.25 * heads) * ra, ra), c);
 
     fragColor = c * mask * qt_Opacity;
 }
