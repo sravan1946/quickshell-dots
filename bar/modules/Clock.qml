@@ -251,7 +251,8 @@ Mod {
                         Behavior on color { ColorAnimation { duration: 120 } }
                         opacity: past ? 0.5 : 1
                         HoverHandler { id: evHover; cursorShape: Qt.PointingHandCursor }
-                        TapHandler { onTapped: { Qt.openUrlExternally(ev.e.link); panel.close() } }
+                        // the Join pill has its own tap: the row's must not open the event as well
+                        TapHandler { onTapped: if (!joinHover.hovered) { Qt.openUrlExternally(ev.e.link); panel.close() } }
 
                         RowLayout {
                             anchors { fill: parent; leftMargin: 6; rightMargin: 6 }
@@ -275,6 +276,37 @@ Mod {
                                 color: Theme.mainFg
                                 opacity: 0.5
                                 font { family: Theme.font; pixelSize: 10 }
+                            }
+                            // Google Meet, in the calendar's account (gcal.py adds authuser); solid
+                            // from 10 minutes before it starts until it ends
+                            Rectangle {
+                                id: join
+                                readonly property bool soon: new Date(ev.e.start) - clock.now <= 600000
+                                visible: !!ev.e.meet && !ev.past
+                                implicitWidth: joinRow.implicitWidth + 14
+                                implicitHeight: 20
+                                radius: 10
+                                color: soon ? Theme.actBg : joinHover.hovered ? Qt.alpha(Theme.mainFg, 0.15) : "transparent"
+                                border.color: soon ? "transparent" : Qt.alpha(Theme.mainFg, 0.3)
+                                Behavior on color { ColorAnimation { duration: 120 } }
+                                HoverHandler { id: joinHover; cursorShape: Qt.PointingHandCursor }
+                                TapHandler { onTapped: { Qt.openUrlExternally(ev.e.meet); panel.close() } }
+                                Row {
+                                    id: joinRow
+                                    anchors.centerIn: parent
+                                    spacing: 4
+                                    Text {
+                                        text: Theme.g(0xF0567)
+                                        color: join.soon ? Theme.actFg : Theme.mainFg
+                                        font { family: Theme.font; pixelSize: 12 }
+                                    }
+                                    Text {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: "Join"
+                                        color: join.soon ? Theme.actFg : Theme.mainFg
+                                        font { family: Theme.font; pixelSize: 10; bold: true }
+                                    }
+                                }
                             }
                         }
                     }

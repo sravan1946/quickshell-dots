@@ -4,7 +4,7 @@
 # ///
 """Google Calendar events for the bar's calendar, from the calendar's secret iCal
 address (read-only, no OAuth). Prints one JSON object:
-  {"events": [{title, start, end, allDay, location, link}], "fetched": epoch_ms, "stale": bool,
+  {"events": [{title, start, end, allDay, location, link, meet}], "fetched": epoch_ms, "stale": bool,
    "owner": calendar email, "tz": IANA zone (for new-event links)}
 with recurring events expanded over [today - 60d, today + 180d], times in local time.
 
@@ -13,6 +13,7 @@ feed is cached, so a failed fetch still prints events (stale: true).
 """
 import base64
 import json
+import re
 import sys
 import time
 import urllib.parse
@@ -62,6 +63,16 @@ def link(uid, start, recurring, all_day, owner):
     return f"https://calendar.google.com/calendar/event?eid={token}&authuser={urllib.parse.quote(owner)}"
 
 
+def meet(ev, owner):
+    """The event's Google Meet link (Google's conference field, else one in the description or
+    location), opened in the calendar owner's account like `link`; "" without one."""
+    url = str(ev.get("X-GOOGLE-CONFERENCE", ""))
+    if not url:
+        m = re.search(r"https://meet\.google\.com/[a-z]+-[a-z]+-[a-z]+", f'{ev.get("DESCRIPTION", "")} {ev.get("LOCATION", "")}')
+        url = m.group(0) if m else ""
+    return f"{url}?authuser={urllib.parse.quote(owner)}" if url else ""
+
+
 def main():
     url = URL_FILE.read_text().strip()
     owner = urllib.parse.unquote(url.split("/ical/")[1].split("/")[0])
@@ -81,6 +92,7 @@ def main():
             "end": end.isoformat(),
             "allDay": all_day,
             "location": str(ev.get("LOCATION", "")),
+            "meet": meet(ev, owner),
             "link": link(str(ev.get("UID", "")), s_raw, bool(ev.get("RRULE") or ev.get("RECURRENCE-ID")), all_day, owner),
         })
     out.sort(key=lambda e: (e["start"], not e["allDay"]))
