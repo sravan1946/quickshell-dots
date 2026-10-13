@@ -14,7 +14,19 @@ import qs
 // show again when it is turned off.
 // History.qml keeps what was received; the panel lives in modules/Dnd.qml.
 Scope {
-    readonly property int slide: 392   // window width: cards slide in from the screen edge
+    id: root
+    readonly property int slide: 392   // card + screen gap: cards slide in from the screen edge
+    readonly property int bounce: 16   // room left of the cards for the arrival overshoot
+
+    function place() {
+        win.screen = Quickshell.screens.find(s => s.name === Hyprland.focusedMonitor?.name) ?? Quickshell.screens[0]
+        win.visible = true
+    }
+    // unplugging the monitor the stack is on hides the window (Quickshell sets visible false)
+    // and nothing brought it back: every notification after went nowhere. Move it to the
+    // focused monitor and show it again
+    readonly property bool lost: !Quickshell.screens.some(s => s === win.screen)
+    onLostChanged: if (lost) Qt.callLater(place)   // not from inside the binding: loop warning
 
     NotificationServer {
         id: server
@@ -28,8 +40,7 @@ Scope {
         // is open and logging, it is the only place it shows, so no popup
         onNotification: n => {
             // a fresh stack opens on the monitor the cursor is on; it stays put until cleared
-            if (server.trackedNotifications.values.length === 0)
-                win.screen = Quickshell.screens.find(s => s.name === Hyprland.focusedMonitor?.name) ?? Quickshell.screens[0]
+            if (server.trackedNotifications.values.length === 0 || root.lost) root.place()
             if (!Config.historyPaused) History.add(n)
             n.tracked = !(Config.historyOpen && !Config.historyPaused)
         }
@@ -55,7 +66,7 @@ Scope {
         id: win
         anchors { top: true; right: true }
         margins { top: Config.height + 8 }
-        implicitWidth: slide
+        implicitWidth: slide + bounce
         // full height under the bar; the mask keeps the empty part click-through
         implicitHeight: (screen ? screen.height : 1080) - Config.height - 16
         exclusionMode: ExclusionMode.Ignore
@@ -68,12 +79,14 @@ Scope {
         // what the cards and the clear-all pill cover; everything else is click-through
         Item {
             id: bounds
+            x: bounce
             width: 380
             height: Config.dnd ? 0 : list.y + list.height
         }
 
         ListView {
             id: list
+            x: bounce
             // the clear-all pill sits above the stack
             y: clearAll.shown ? clearAll.height + 8 : 0
             Behavior on y { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
@@ -81,7 +94,8 @@ Scope {
             // a burst taller than the screen scrolls instead of running off the bottom.
             // DND only fades it (and drops it from the mask): collapsing the height cut the fade off
             height: Math.min(contentHeight, win.height - y)
-            clip: true
+            // only clip a scrolling burst: clipping always cut the overshoot off
+            clip: contentHeight > height
             boundsBehavior: Flickable.StopAtBounds
             spacing: 8
             model: server.trackedNotifications
@@ -89,29 +103,56 @@ Scope {
             visible: opacity > 0
             Behavior on opacity { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
 
+            // in: slide off the edge, overshoot ~14px (overshoot 1.0) into the bounce margin and
+            // settle, while the card grows from 94% anchored on its right side
             add: Transition {
                 ParallelAnimation {
-                    NumberAnimation { property: "x"; from: slide; to: 0; duration: 280; easing.type: Easing.OutCubic }
-                    NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 220 }
+                    NumberAnimation { property: "x"; from: slide; to: 0; duration: 520; easing.type: Easing.OutBack; easing.overshoot: 1.0 }
+                    NumberAnimation { property: "scale"; from: 0.94; to: 1; duration: 420; easing.type: Easing.OutQuint }
                 }
             }
+            // out: shrink a touch, then accelerate away
             remove: Transition {
                 ParallelAnimation {
-                    NumberAnimation { property: "x"; to: slide; duration: 200; easing.type: Easing.InCubic }
-                    NumberAnimation { property: "opacity"; to: 0; duration: 160 }
+                    NumberAnimation { property: "scale"; to: 0.94; duration: 160; easing.type: Easing.OutCubic }
+                    NumberAnimation { property: "x"; to: slide; duration: 300; easing.type: Easing.InQuint }
                 }
             }
             // new cards land at the bottom: keep them in view unless you're reading the stack
             HoverHandler { id: listHover }
             onCountChanged: if (!listHover.hovered) Qt.callLater(() => list.positionViewAtEnd())
 
+            // the gap closes once the leaving card is mostly gone, not under it
+            removeDisplaced: Transition {
+                SequentialAnimation {
+                    PauseAnimation { duration: 140 }
+                    NumberAnimation { property: "y"; duration: 320; easing.type: Easing.OutQuint }
+                }
+            }
             displaced: Transition {
-                NumberAnimation { property: "y"; duration: 220; easing.type: Easing.OutCubic }
+                NumberAnimation { property: "y"; duration: 320; easing.type: Easing.OutQuint }
             }
 
             delegate: Rectangle {
                 id: card
                 required property var modelData
+                transformOrigin: Item.Right
+
+                // swipe right to dismiss: past a third of the card or a quick flick it goes (the
+                // remove transition carries on from where the finger left it), else it springs back
+                DragHandler {
+                    id: swipe
+                    yAxis.enabled: false
+                    xAxis.minimum: 0
+                    onActiveChanged: if (!active) {
+                        if (card.x > card.width / 3 || centroid.velocity.x > 800) card.modelData.tracked = false
+                        else snapBack.start()
+                    }
+                }
+                NumberAnimation { id: snapBack; target: card; property: "x"; to: 0; duration: 420; easing.type: Easing.OutBack; easing.overshoot: 1.0 }
+                // fade follows the slide, so arriving, leaving and swiping all fade the same way.
+                // (a binding here plus opacity animations in add/remove fought each frame)
+                opacity: 1 - Math.max(0, Math.min(card.x / card.width, 1))
                 readonly property bool critical: modelData.urgency === NotificationUrgency.Critical
 
                 width: list.width
@@ -261,7 +302,7 @@ Scope {
             opacity: shown ? 1 : 0
             visible: opacity > 0
             Behavior on opacity { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
-            x: list.width - width
+            x: list.x + list.width - width
             y: 0
             radius: height / 2
             color: clearMouse.containsMouse ? Theme.hvrBg : Theme.mainBg

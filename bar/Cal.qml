@@ -11,6 +11,7 @@ Singleton {
 
     property var events: []
     property var byDay: ({})        // "yyyy-MM-dd" -> events touching that day
+    property string raw: ""         // last events JSON, to skip identical refreshes
     property real fetched: 0
     property bool stale: false      // fetch failed, showing the cached feed
     property bool failed: false     // no events at all (no URL file, no cache)
@@ -68,8 +69,14 @@ Singleton {
             onStreamFinished: {
                 try {
                     const d = JSON.parse(text)
-                    root.events = d.events
-                    root.byDay = root.index(d.events)
+                    // same feed as last time (the usual case): keep the arrays, so the open
+                    // calendar doesn't rebuild every day cell and event row for nothing
+                    const raw = JSON.stringify(d.events)
+                    if (raw !== root.raw) {
+                        root.raw = raw
+                        root.events = d.events
+                        root.byDay = root.index(d.events)
+                    }
                     root.fetched = d.fetched
                     root.stale = d.stale
                     root.owner = d.owner

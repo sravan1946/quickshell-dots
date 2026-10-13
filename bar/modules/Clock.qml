@@ -225,7 +225,8 @@ Mod {
                     color: Cal.stale ? "#e0af68" : Theme.mainFg
                     opacity: Cal.loading ? 1 : 0.5
                     font { family: Theme.font; pixelSize: 12 }
-                    RotationAnimator on rotation { running: Cal.loading; from: 0; to: 360; duration: 900; loops: Animation.Infinite }
+                    // not while the card pours: an animator inside its layer halves the pour to 30fps
+                    RotationAnimator on rotation { running: Cal.loading && panel.opened; from: 0; to: 360; duration: 900; loops: Animation.Infinite }
                     TapHandler { onTapped: Cal.refresh() }
                 }
             }
