@@ -18,7 +18,7 @@ import qs.components
 // every crossing. `qs -c bar ipc call quick toggle` opens it on the focused monitor.
 // It holds only what the bar doesn't: Wi-Fi, Bluetooth, DND, caffeine, battery, volume,
 // brightness and media all have their pill. Here: session buttons, night light, airplane
-// mode, mic, the phone (KDE Connect), audio device pickers and a per-app mixer.
+// mode, speaker + mic levels, the phone (KDE Connect), audio device pickers and a per-app mixer.
 Scope {
     id: root
 
@@ -31,15 +31,16 @@ Scope {
     property real edgeY: 0       // where the pointer touched the edge (panel-window y); spawn point
     property string section: ""  // "out" | "in": the device list pulled out under its row
     property int mixDrag: 0      // per-app sliders being dragged
-    readonly property bool busy: mic.pressed || nl.pressed || mixDrag > 0   // mid-drag: don't close
+    readonly property bool busy: spk.pressed || mic.pressed || nl.pressed || mixDrag > 0   // mid-drag: don't close
 
+    readonly property var sink: Pipewire.defaultAudioSink
     readonly property var src: Pipewire.defaultAudioSource
     readonly property var bt: Bluetooth.defaultAdapter
     // playback streams: apps sending audio out. Quickshell counts these as sinks (Spotify's
     // stream: isSink true; cava's recording stream: false), and node.properties stays empty
     // until a node is tracked, so media.class can't be used to pick them
     readonly property var streams: Pipewire.nodes.values.filter(n => n.isStream && n.isSink && n.audio)
-    PwObjectTracker { objects: [root.src].concat(root.streams) }
+    PwObjectTracker { objects: [root.sink, root.src].concat(root.streams) }
 
     // apps by name; ALSA devices by profile ("Speaker", not "Ryzen HD Audio Controller Speaker")
     function nodeName(n) { return n?.properties?.["application.name"] || n?.properties?.["device.profile.description"] || n?.description || n?.nickname || n?.name || "" }
@@ -297,6 +298,31 @@ Scope {
                     }
                 }
 
+                // Hyprland refused the beatglow plugin, almost always after a Hyprland update (Update.qml)
+                RowLayout {
+                    visible: Update.pluginStale
+                    Layout.fillWidth: true
+                    spacing: 10
+                    T { text: Theme.g(0xF06B0); color: Theme.actBg; font.pixelSize: 18 }   // update
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 0
+                        T { text: "Border plugin needs a rebuild"; font.bold: true }
+                        T {
+                            Layout.fillWidth: true
+                            text: "Hyprland updated since beatglow was built"
+                            opacity: 0.6
+                            elide: Text.ElideRight
+                            font.pixelSize: 11
+                        }
+                    }
+                    PillButton {
+                        implicitHeight: 24
+                        text: Update.pluginBusy ? "Building…" : "Rebuild"
+                        onClicked: Update.rebuildPlugin()
+                    }
+                }
+
                 GridLayout {
                     Layout.fillWidth: true
                     columns: 2
@@ -360,6 +386,17 @@ Scope {
                     spacing: 2
                     DevicePicker { sink: true }
                     DevicePicker { sink: false }
+                }
+
+                SliderRow {
+                    id: spk
+                    readonly property var a: root.sink?.audio
+                    icon: a?.muted ? 0xF0581 : Util.headphones(root.sink) ? 0xF02CB
+                        : (a?.volume ?? 0) < 0.34 ? 0xF057F : (a?.volume ?? 0) < 0.67 ? 0xF0580 : 0xF057E
+                    value: a?.volume ?? 0
+                    muted: !!a?.muted
+                    onIconClicked: if (a) a.muted = !a.muted
+                    onMoved: v => { if (a) a.volume = v }
                 }
 
                 SliderRow {

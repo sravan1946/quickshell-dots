@@ -1,5 +1,6 @@
 import QtQuick
 import Quickshell
+import Quickshell.Hyprland
 import Quickshell.Wayland
 import qs.components
 
@@ -17,13 +18,24 @@ PanelWindow {
     // Hyprland drop the popup.
     WlrLayershell.keyboardFocus: Tip.popups > 0 ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
 
+    // A real fullscreen window (mode 2, not maximise) covers the bar: stop drawing it, or the
+    // beat effects keep repainting it 30 times a second behind the window. The workspace only
+    // says it has *a* fullscreen window, so each toplevel's mode is re-read on every change.
+    readonly property var workspace: Hyprland.monitorFor(modelData)?.activeWorkspace ?? null
+    readonly property bool covered: !!workspace?.hasFullscreen
+        && workspace.toplevels.values.some(t => (t.lastIpcObject.fullscreen ?? 0) & 2)
+    Connections {
+        target: Hyprland
+        function onRawEvent(e) { if (e.name === "fullscreen") Hyprland.refreshToplevels() }
+    }
+
     // beat waves along the bottom edge (shaders/bar.frag), from the media pill, which sets
     // beatX on each kick. Spent waves stop changing the uniforms, so the bar only repaints
     // while one is running.
     property real beatX: width / 4
     ShaderEffect {
         anchors.fill: parent
-        visible: Visualizer.active
+        visible: Visualizer.active && !covered
         readonly property vector2d res: Qt.vector2d(width, height)
         readonly property real ox: beatX
         readonly property vector4d fronts: Visualizer.waveFronts
@@ -33,8 +45,8 @@ PanelWindow {
         readonly property vector4d kr: Visualizer.beatR
         readonly property vector4d kg: Visualizer.beatG
         readonly property vector4d kb: Visualizer.beatB
-        // Qt caches shaders by URL across reloads: bump ?v= after shaders/build.sh
-        fragmentShader: Qt.resolvedUrl("shaders/bar.frag.qsb?v=11")
+        // Qt caches shaders by URL across reloads: shaders/build.sh stamps ?v= with the .qsb hash
+        fragmentShader: Qt.resolvedUrl("shaders/bar.frag.qsb?v=2a01f86c")
     }
 
     // a click on the bar's empty space closes any open click popup (a module's own click
@@ -47,9 +59,9 @@ PanelWindow {
     }
 
     // HyDE margins: .modules-left 0, .modules-right 0.2em margin + 0.2em padding
-    Section { side: "left"; anchors.left: parent.left }
-    Section { side: "center"; anchors.horizontalCenter: parent.horizontalCenter }
-    Section { side: "right"; anchors.right: parent.right; anchors.rightMargin: 4 }
+    Section { visible: !covered; side: "left"; anchors.left: parent.left }
+    Section { visible: !covered; side: "center"; anchors.horizontalCenter: parent.horizontalCenter }
+    Section { visible: !covered; side: "right"; anchors.right: parent.right; anchors.rightMargin: 4 }
 
     Tooltip { screen: modelData }
 }

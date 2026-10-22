@@ -9,7 +9,7 @@
 //   2 matrix: an LED panel lit up to each column's level, cool at the floor and white-hot
 //     at the top, with a peak LED riding above
 //   3 aurora: curtains of light swaying over a mountain ridge under twinkling stars
-// Rebuild after editing: shaders/build.sh, then bump ?v= in components/Spectrum.qml
+// Rebuild after editing: shaders/build.sh (it re-stamps the ?v= in the QML too)
 layout(location = 0) in vec2 qt_TexCoord0;
 layout(location = 0) out vec4 fragColor;
 layout(std140, binding = 0) uniform buf {

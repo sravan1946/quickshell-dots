@@ -14,11 +14,25 @@ Singleton {
     // the players worth showing: a browser keeps its MPRIS entry after a tab's media ends
     // (stopped, no title), and that empty one mustn't stand in for a real player
     readonly property var players: Mpris.players.values.filter(p => p.playbackState !== MprisPlaybackState.Stopped || p.trackTitle !== "")
-    readonly property var auto: players.find(p => p.isPlaying) ?? players[0] ?? null
-    // a pick holds until that player goes away or another one becomes the playing one
-    // ponytail: only sees a start that changes `auto` (first playing in list order); track per-player starts if that bites
+    // the one that started playing last, while it plays; else the first playing, else the first
+    property var started: null
+    readonly property var auto: (started?.isPlaying && players.includes(started) ? started : null)
+        ?? players.find(p => p.isPlaying) ?? players[0] ?? null
+    // a pick holds until that player goes away or another one starts playing
     property var picked: null
     onAutoChanged: if (auto?.isPlaying && auto !== picked) picked = null
+    Instantiator {
+        model: Mpris.players
+        Connections {
+            required property var modelData
+            target: modelData
+            function onIsPlayingChanged() {
+                if (!modelData.isPlaying) return
+                pl.started = modelData
+                if (pl.picked !== modelData) pl.picked = null
+            }
+        }
+    }
     readonly property var player: (picked && players.includes(picked) ? picked : null) ?? auto
     readonly property bool playing: !!player?.isPlaying
     // paused for 10 minutes: the pill folds away until it plays again
@@ -30,13 +44,14 @@ Singleton {
     // position the player sent, and Spotify doesn't always send one on a loop or replay
     // (no Seeked signal): it ran on past the track's end. So the position is asked for over
     // D-Bus every 2 s while playing (10 s with the panel closed) (and just after anything moves it) and run on a clock of
-    // our own in between, re-read on Visualizer's frame clock (tick: the fallback without frames).
+    // our own in between, re-read on Visualizer's frame clock while the panel is open, else each second (tick).
     readonly property real length: player?.lengthSupported ? player.length : 0
     property real syncPos: -1      // s, the player's own answer; -1 until the first one
     property double syncAt: 0      // epoch s it arrived
     property int tick: 0
     readonly property real pos: {
-        Visualizer.t; tick   // re-read every frame
+        if (open) Visualizer.t   // the panel's seek bar and lyrics: every frame
+        tick                     // otherwise each second, plenty for the pill's progress line
         if (!player?.positionSupported) return 0
         const p = syncPos < 0 ? player.position : syncPos + (playing ? Date.now() / 1000 - syncAt : 0)
         return Math.max(0, Math.min(length || Infinity, p))
@@ -50,7 +65,7 @@ Singleton {
     }
     onPlayingChanged: { if (playing) idle = false; refreshPos() }
     onPlayerChanged: { idle = false; syncPos = -1; refreshPos() }
-    Timer { interval: 3000; repeat: true; running: pl.playing && !Visualizer.active; onTriggered: pl.tick++ }
+    Timer { interval: 1000; repeat: true; running: pl.playing && !(pl.open && Visualizer.active); onTriggered: pl.tick++ }
     Timer { id: syncSoon; interval: 150; onTriggered: pl.sync() }
     // the panel's seek bar and lyrics want it tight; the pill's progress line doesn't
     Timer { interval: pl.open ? 2000 : 10000; repeat: true; running: pl.playing; onTriggered: pl.sync() }

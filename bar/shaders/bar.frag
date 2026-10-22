@@ -4,7 +4,7 @@
 // with a fading wake and light lifting off the edge. Up to
 // four run at once, so quick kicks chase each other out. Sits behind the modules.
 // Each is coloured by what its kick sounded like (Visualizer.kickColor).
-// Rebuild after editing: shaders/build.sh, then bump ?v= in Bar.qml
+// Rebuild after editing: shaders/build.sh (it re-stamps the ?v= in the QML too)
 layout(location = 0) in vec2 qt_TexCoord0;
 layout(location = 0) out vec4 fragColor;
 layout(std140, binding = 0) uniform buf {

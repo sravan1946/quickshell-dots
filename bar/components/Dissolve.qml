@@ -13,6 +13,6 @@ ShaderEffect {
     property real hole: 0         // 1: eat the content away from origin instead (progress 1 -> 0)
     property color glow: Theme.actBg
     readonly property vector2d res: Qt.vector2d(width, height)
-    // Qt caches shaders by URL across reloads: bump ?v= after shaders/build.sh
-    fragmentShader: Qt.resolvedUrl("../shaders/dissolve.frag.qsb?v=2")
+    // Qt caches shaders by URL across reloads: shaders/build.sh stamps ?v= with the .qsb hash
+    fragmentShader: Qt.resolvedUrl("../shaders/dissolve.frag.qsb?v=578ab32c")
 }

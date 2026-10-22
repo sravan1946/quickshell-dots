@@ -109,8 +109,8 @@ Item {
             readonly property vector4d l5: Visualizer.l5
             readonly property vector4d l6: Visualizer.l6
             readonly property vector4d l7: Visualizer.l7
-            // Qt caches shaders by URL across reloads: bump ?v= after shaders/build.sh
-            fragmentShader: Qt.resolvedUrl("../shaders/pill.frag.qsb?v=24")
+            // Qt caches shaders by URL across reloads: shaders/build.sh stamps ?v= with the .qsb hash
+            fragmentShader: Qt.resolvedUrl("../shaders/pill.frag.qsb?v=aa35ace5")
         }
 
         // cover: a tinted glow behind it breathes with the bass

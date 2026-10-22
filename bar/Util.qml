@@ -1,12 +1,20 @@
 pragma Singleton
 import QtQuick
 import Quickshell
+import Quickshell.Bluetooth
 
 Singleton {
     function run(cmd) { Quickshell.execDetached(["sh", "-c", cmd]) }
 
-    // Bluetooth sinks carry no form factor; ponytail: a BT speaker gets the headphone icon too
-    function headphones(sink) { return /head(phone|set)/i.test(sink?.description ?? "") || (sink?.name ?? "").startsWith("bluez_output") }
+    // A Bluetooth sink's node carries no form factor: look its MAC (bluez_output.40_72_….1)
+    // up in BlueZ, whose icon says headset/headphones or speaker
+    function headphones(sink) {
+        const name = sink?.name ?? ""
+        if (!name.startsWith("bluez_output.")) return /head(phone|set)/i.test(sink?.description ?? "")
+        const mac = name.split(".")[1].replace(/_/g, ":")
+        const dev = Bluetooth.devices.values.find(d => d.address === mac)
+        return !dev || /head(phone|set)/.test(dev.icon)   // unknown: as before, headphones
+    }
 
     // waybar getIcon(): index = value / (100 / n), clamped; icons are codepoints
     function pick(icons, pct) {

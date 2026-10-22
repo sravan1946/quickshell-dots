@@ -10,7 +10,8 @@ carries the bar's beat wave onto the focused window's border.
 ```
 bar/                        the Quickshell config (run with `qs -c bar`)
   shell.qml                 entry point: bar, quick settings, OSD, notifications, now playing
-  Config.qml                bar layout: which modules go in which pill
+  Config.qml                shared bar state (open panels, DND, bar size)
+  Settings.qml              every setting and its default, saved to ~/.config/quickshell-bar
   Theme.qml                 colours, read live from HyDE's wallbash output
   modules/                  one file per bar module (Workspaces, Media, Clock, Network, …)
   components/               shared pieces (pills, dropdowns, Wi-Fi / Bluetooth lists, …)
@@ -123,8 +124,10 @@ end)
 ```
 
 The plugin is built against one exact Hyprland version and refuses to load against any
-other. **Run `make -C hypr/beatglow` again after every Hyprland update.** The bar works
-without the plugin; you only lose the border wave.
+other. After a Hyprland update, quick settings shows a **Rebuild** button for it, or run
+`make -C hypr/beatglow load` (rebuilds and swaps it into the running Hyprland). Updating the
+bar from quick settings rebuilds it too when the update changed it. The bar works without the
+plugin; you only lose the border wave.
 
 ### Google Calendar (optional)
 
@@ -160,10 +163,10 @@ it. Once the config is fixed: `systemctl --user reset-failed quickshell-bar && s
 
 ## Customising
 
-- **Layout:** edit the `left`, `center` and `right` pill lists in `bar/Config.qml`; module
-  names are file names in `bar/modules/`.
+- **Layout:** Settings → Bar arranges the pills (saved as `layout` in
+  `~/.config/quickshell-bar/settings.json`); module names are file names in `bar/modules/`.
 - **Colours and font:** `bar/Theme.qml`.
 - **Shaders:** Qt only loads precompiled shaders. After editing a `.frag`, run
-  `bar/shaders/build.sh`, then bump the `?v=` on that shader's URL in its QML file. Qt caches
-  shaders by URL across reloads.
+  `bar/shaders/build.sh`. Qt caches shaders by URL across reloads, so it also stamps each
+  shader's `?v=` in the QML with the new build's hash.
 - Saving any `.qml` file reloads the shell live.

@@ -7,7 +7,7 @@
 // Draws rounded spokes out from `inner` (root c3 -> tip c1), a glow hugging them, a
 // smooth ghost line on the peaks (c2) and a halo just inside the ring that swells with
 // the bass. Quiet spokes shrink to dots, so silence is a ring of beads.
-// Rebuild after editing: shaders/build.sh, then bump ?v= in components/Ring.qml
+// Rebuild after editing: shaders/build.sh (it re-stamps the ?v= in the QML too)
 layout(location = 0) in vec2 qt_TexCoord0;
 layout(location = 0) out vec4 fragColor;
 layout(std140, binding = 0) uniform buf {

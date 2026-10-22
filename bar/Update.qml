@@ -15,7 +15,18 @@ Singleton {
     readonly property bool busy: proc.running
     property double checkedAt: 0
 
-    function check() { run([]) }
+    // the beatglow plugin is built but Hyprland didn't load it: almost always a Hyprland
+    // update it refused (main.cpp's version check). rebuildPlugin() builds and loads it.
+    property bool pluginStale: false
+    readonly property bool pluginBusy: plugin.running
+    readonly property string pluginDir: Qt.resolvedUrl("../hypr/beatglow").toString().replace("file://", "")
+    function rebuildPlugin() {
+        if (plugin.running) return
+        plugin.command = ["sh", "-c", `make -s -C '${pluginDir}' load >/dev/null 2>&1; ${plugin.test}`]
+        plugin.running = true
+    }
+
+    function check() { run([]); if (!plugin.running) { plugin.command = ["sh", "-c", plugin.test]; plugin.running = true } }
     function pull() { run(["pull"]) }
     function stale() { if (Date.now() - checkedAt > 10 * 60000) check() }
 
@@ -28,6 +39,13 @@ Singleton {
 
     Timer { interval: 60000; running: true; onTriggered: root.check() }
     Timer { interval: 3600000; running: true; repeat: true; onTriggered: root.check() }
+
+    Process {
+        id: plugin
+        // exit 0: needs a rebuild
+        readonly property string test: `[ -f '${root.pluginDir}/beatglow.so' ] && ! hyprctl plugin list | grep -q '^Plugin beatglow '`
+        onExited: code => root.pluginStale = code === 0
+    }
 
     Process {
         id: proc

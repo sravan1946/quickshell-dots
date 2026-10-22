@@ -37,6 +37,6 @@ ShaderEffect {
     Component.onCompleted: Visualizer.peakUsers++
     Component.onDestruction: Visualizer.peakUsers--
 
-    // Qt caches shaders by URL across reloads: bump ?v= after shaders/build.sh
-    fragmentShader: Qt.resolvedUrl("../shaders/ring.frag.qsb?v=4")
+    // Qt caches shaders by URL across reloads: shaders/build.sh stamps ?v= with the .qsb hash
+    fragmentShader: Qt.resolvedUrl("../shaders/ring.frag.qsb?v=7009ad28")
 }

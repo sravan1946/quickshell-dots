@@ -6,7 +6,7 @@
 // progress as a hairline with a glowing head along the bottom, and on each beat a light
 // that runs round the rim from the bottom centre, where the bass sits. Up to four run at
 // once, so quick kicks chase each other round instead of restarting one another. Masked to the pill's rounded shape.
-// Rebuild after editing: shaders/build.sh, then bump ?v= in modules/Media.qml
+// Rebuild after editing: shaders/build.sh (it re-stamps the ?v= in the QML too)
 layout(location = 0) in vec2 qt_TexCoord0;
 layout(location = 0) out vec4 fragColor;
 layout(std140, binding = 0) uniform buf {

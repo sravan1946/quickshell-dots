@@ -59,7 +59,7 @@ Rectangle {
         readonly property vector4d kr: Visualizer.beatR
         readonly property vector4d kg: Visualizer.beatG
         readonly property vector4d kb: Visualizer.beatB
-        // Qt caches shaders by URL across reloads: bump ?v= after shaders/build.sh
-        fragmentShader: Qt.resolvedUrl("../shaders/rim.frag.qsb?v=6")
+        // Qt caches shaders by URL across reloads: shaders/build.sh stamps ?v= with the .qsb hash
+        fragmentShader: Qt.resolvedUrl("../shaders/rim.frag.qsb?v=159c0152")
     }
 }

@@ -3,7 +3,7 @@
 // waveFronts) runs along the bar, the rim lights up where it passes, a flash then an
 // afterglow, so the light sweeps across the pill and the whole rim stays lit for a moment
 // after (the wave itself crosses a pill in a few ms). A faint glow inside. Up to four at once.
-// Rebuild after editing: shaders/build.sh, then bump ?v= in components/Pill.qml
+// Rebuild after editing: shaders/build.sh (it re-stamps the ?v= in the QML too)
 layout(location = 0) in vec2 qt_TexCoord0;
 layout(location = 0) out vec4 fragColor;
 layout(std140, binding = 0) uniform buf {
