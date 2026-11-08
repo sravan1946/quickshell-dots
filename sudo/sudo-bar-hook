@@ -1,0 +1,27 @@
+#!/bin/sh
+# pam_exec hook for /etc/pam.d/sudo (see sudo.pam): tells the island bar where sudo's auth is,
+# so its card (bar/islands/AuthState.qml) can show it.
+#   finger  pam_fprintd is about to wait for a finger
+#   pass    the finger didn't do it; a password is next (the askpass, or the terminal)
+#   ok      authenticated (open_session)
+# pam_exec runs it as sudo's real user (you), unless the PAM line says seteuid (root): either
+# way the IPC call runs as you. Still install it root-owned (install -o root -m755), since PAM
+# runs it. Never fails, never blocks sudo.
+[ -n "$PAM_RUSER" ] || exit 0
+uid=$(id -u "$PAM_RUSER" 2>/dev/null) || exit 0
+gid=$(id -g "$PAM_RUSER")
+case $(id -u) in
+  0) as="setpriv --reuid=$uid --regid=$gid --clear-groups" ;;
+  "$uid") as= ;;
+  *) exit 0 ;;
+esac
+bar=$(pgrep -u "$uid" -f '^/usr/bin/qs -c bar$' | head -1)
+[ -n "$bar" ] || exit 0
+cmd=$(tr '\0' ' ' < /proc/$PPID/cmdline 2>/dev/null)
+# sudo is setuid, so as you its cwd is unreadable: its parent's (yours, where sudo was run) is
+cwd=$(readlink /proc/$PPID/cwd 2>/dev/null) ||
+  cwd=$(readlink /proc/$(awk '/^PPid:/{print $2}' /proc/$PPID/status)/cwd 2>/dev/null)
+home=$(getent passwd "$PAM_RUSER" | cut -d: -f6)
+setsid -f $as env -i HOME="$home" LANG=C.UTF-8 XDG_RUNTIME_DIR="/run/user/$uid" \
+  /usr/bin/qs ipc --pid "$bar" call auth sudo "$1" "$PPID" "$cmd" "$cwd" >/dev/null 2>&1 </dev/null
+exit 0

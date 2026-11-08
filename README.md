@@ -65,6 +65,17 @@ of always opening as a password box:
 The prompt also shows which app and polkit action asked, and whether that action's policy
 file came from a package or the app installed it itself.
 
+**sudo uses the same card.** `sudo/` holds a PAM stack for `/etc/pam.d/sudo` (finger first, then
+the password) with a small root hook that tells the bar where sudo's auth is, and
+`bar-askpass` (as `SUDO_ASKPASS`) that takes the password from the card instead of a dialog.
+A terminal `sudo` still gets the finger ring; its password stays in the terminal.
+
+```sh
+sudo install -o root -g root -m755 sudo/sudo-bar-hook /usr/local/bin/sudo-bar-hook   # root-owned: PAM runs it as root
+sudo install -o root -g root -m644 sudo/sudo.pam /etc/pam.d/sudo
+ln -s "$PWD/sudo/bar-askpass" ~/.local/bin/bar-askpass   # and SUDO_ASKPASS=~/.local/bin/bar-askpass
+```
+
 **Power menu.** The screen blurs, a big clock shows the date and uptime, and a pill of actions
 pours out under it. Log out, reboot and shut down must be held until a ring fills.
 
@@ -87,6 +98,7 @@ bar/                        the Quickshell config (run with `qs -c bar`)
   Bar.qml, modules/         the v1 pill bar, kept on disk but unused
 hypr/beatglow/              Hyprland plugin: the beat wave on the window border
 polkit/                     rule that lets the polkit prompt skip a stuck fingerprint wait
+sudo/                       sudo through the auth card: PAM stack, root hook, askpass
 systemd/                    user units: the bar, and live reload on edits
 ```
 

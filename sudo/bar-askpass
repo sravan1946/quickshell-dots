@@ -1,0 +1,18 @@
+#!/bin/bash
+# SUDO_ASKPASS: the password goes into the island bar's auth card (bar/islands/AuthState.qml)
+# instead of a separate dialog. The bar answers through a fifo: "P<password>" or "C" (cancelled).
+# Falls back to rofi-askpass when the bar isn't running.
+rofi=~/.local/bin/rofi-askpass
+bar=$(systemctl --user show -p MainPID --value quickshell-bar 2>/dev/null)
+[[ $bar && $bar != 0 ]] || exec "$rofi" "$@"
+fifo=$(mktemp -u "${XDG_RUNTIME_DIR:-/tmp}/askpass.XXXXXX")
+mkfifo -m600 "$fifo" || exec "$rofi" "$@"
+exec 3<>"$fifo"   # read-write: opening never blocks, whichever side comes first
+cmd=$(tr '\0' ' ' < /proc/$PPID/cmdline)
+if ! qs ipc --pid "$bar" call auth ask "$fifo" "$PPID" "$cmd" "$PWD" >/dev/null 2>&1; then
+  exec 3<&-; rm -f "$fifo"; exec "$rofi" "$@"
+fi
+IFS= read -r -t 300 line <&3; ok=$?
+exec 3<&-; rm -f "$fifo"
+[[ $ok == 0 && $line == P* ]] || exit 1
+printf '%s\n' "${line#P}"

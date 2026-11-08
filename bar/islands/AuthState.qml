@@ -14,6 +14,11 @@ import Quickshell.Services.Polkit
 //
 //   qs -c bar ipc call auth preview finger|pass|error|ok   (a fake request, for looking at it)
 //   qs -c bar ipc call auth preview ""                      (close it)
+//
+// sudo shows in the same card, without polkit: /etc/pam.d/sudo runs sudo-bar-hook (in
+// ../sudo/) around pam_fprintd, which calls sudo() with where it is (finger, pass, ok), and
+// SUDO_ASKPASS=bar-askpass calls ask() and waits on a fifo for what's typed here. The stage is
+// driven through `preview` (no AuthFlow); `sudo` says it's real.
 Singleton {
     id: s
     readonly property AuthFlow flow: agent.flow
@@ -34,11 +39,18 @@ Singleton {
     property bool skipping: false
     property bool preferPass: false
     property string typed: ""
+    // ---- sudo ----
+    property bool sudo: false
+    property int sudoPid: 0
+    property string fifo: ""           // the askpass waiting for an answer ("" if none is)
+    property bool cancelled: false
+    property bool answered: false      // a password went back: another ask() means it was wrong
 
     PolkitAgent {
         id: agent
         onAuthenticationRequestStarted: {
             doneT.stop()
+            s.sudo = false
             s.preview = ""
             s.ok = false
             s.fails = 0
@@ -65,9 +77,10 @@ Singleton {
         }
     }
     Timer { id: endT; interval: 60; onTriggered: if (!s.ok && !agent.isActive && !s.preview) s.showing = false }
-    Timer { id: doneT; interval: 650; onTriggered: if (!agent.isActive) { s.showing = false; s.preview = "" } }
+    Timer { id: doneT; interval: 650; onTriggered: if (!agent.isActive) { s.showing = false; s.preview = ""; s.sudo = false } }
 
     function submit(v) {
+        if (sudo) { if (fifo) { reply("P" + v); answered = true; preview = "wait" } return }
         if (!preview) { flow?.submit(v); return }
         if (v === "") { preview = "error"; fails++ } else { preview = "ok"; ok = true; doneT.restart() }
     }
@@ -76,10 +89,60 @@ Singleton {
         preferPass = true
         if (skipping) return
         skipping = true
-        if (preview) { preview = "pass"; skipping = false; return }
+        if (preview && !sudo) { preview = "pass"; skipping = false; return }
         Quickshell.execDetached(["systemctl", "kill", "--no-ask-password", "--signal=SIGKILL", "fprintd.service"])
     }
-    function cancel() { if (flow) flow.cancelAuthenticationRequest(); else { preview = ""; showing = false } }
+    function cancel() {
+        if (flow) { flow.cancelAuthenticationRequest(); return }
+        if (sudo) {
+            // the askpass gets "C"; mid-finger, drop the finger so sudo gets to the askpass
+            cancelled = true
+            if (fifo) reply("C")
+            else Quickshell.execDetached(["systemctl", "kill", "--no-ask-password", "--signal=SIGKILL", "fprintd.service"])
+        }
+        preview = ""; showing = false; sudo = false
+    }
+
+    // ---- sudo (sudo-bar-hook and bar-askpass) ----
+    function sudoStart(pid, cmd, cwd) {
+        if (sudo && pid === sudoPid) {   // the hook can't always read sudo's cwd; the askpass can
+            if (!action && cwd) action = "in " + cwd.replace(new RegExp("^" + Quickshell.env("HOME")), "~")
+            return
+        }
+        doneT.stop()
+        sudo = true; sudoPid = pid; fifo = ""; cancelled = false; answered = false
+        ok = false; fails = 0; skipping = false; preferPass = false; typed = ""
+        app = "sudo"; pkg = ""; found = false; icon = ""
+        message = cmd.replace(/^\S*sudo(\s+-\S+)*\s+/, "").trim() || "Run a command as root"
+        action = cwd ? "in " + cwd.replace(new RegExp("^" + Quickshell.env("HOME")), "~") : ""
+        showing = true
+    }
+    // the answer goes in the environment, not argv: /proc/*/environ is yours alone
+    function reply(line) {
+        answer.environment = { A: line }
+        answer.command = ["sh", "-c", '[ -p "$1" ] && printf "%s\\n" "$A" > "$1"', "sh", fifo]
+        fifo = ""
+        answer.running = true
+    }
+    Process { id: answer }
+    // sudo is gone (cancelled, or out of tries): whatever's showing for it goes. Polled, and
+    // only while a sudo card is up
+    Timer {
+        interval: 1000
+        repeat: true
+        running: s.sudo && s.showing
+        onTriggered: if (!alive.running) { alive.pid = s.sudoPid; alive.command = ["test", "-d", "/proc/" + s.sudoPid]; alive.running = true }
+    }
+    Process {
+        id: alive
+        property int pid
+        onExited: code => { if (code !== 0 && s.sudo && pid === s.sudoPid && !s.ok) { if (s.fifo) s.reply("C"); s.preview = ""; s.showing = false; s.sudo = false } }
+    }
+    Timer {   // "pass" with no askpass coming: a terminal sudo, the password goes there
+        id: ttyT
+        interval: 1500
+        onTriggered: if (s.sudo && !s.fifo && s.preview === "wait") { s.preview = ""; s.showing = false; s.sudo = false }
+    }
 
     // ---- who's asking: the policy file defining the action, its vendor, its package ----
     function lookup(id) {
@@ -108,8 +171,27 @@ Singleton {
 
     IpcHandler {
         target: "auth"
-        function preview(stage: string): void {
+        // from sudo-bar-hook (root's PAM, run as you)
+        function sudo(stage: string, pid: int, cmd: string, cwd: string): void {
             if (s.flow) return
+            if (stage === "finger") { s.sudoStart(pid, cmd, cwd); s.preview = "finger"; return }
+            if (!s.sudo || pid !== s.sudoPid || s.cancelled) return
+            if (stage === "pass") { if (!s.fifo) { s.preview = "wait"; ttyT.restart() } }
+            else if (stage === "ok") { s.ok = true; s.preview = "ok"; doneT.restart() }
+        }
+        // from bar-askpass: answer into `fifo`
+        function ask(fifo: string, pid: int, cmd: string, cwd: string): void {
+            if (s.flow) { Quickshell.execDetached(["sh", "-c", 'echo C > "$1"', "sh", fifo]); return }
+            const again = s.sudo && pid === s.sudoPid
+            s.sudoStart(pid, cmd, cwd)
+            s.fifo = fifo
+            if (s.cancelled) { s.reply("C"); return }
+            if (again && s.answered) { s.fails++; s.preview = "error" }
+            else s.preview = "pass"
+            s.skipping = false
+        }
+        function preview(stage: string): void {
+            if (s.flow || s.sudo) return
             if (!stage) { s.preview = ""; s.showing = false; return }
             s.ok = stage === "ok"
             s.fails = stage === "error" ? 1 : 0
