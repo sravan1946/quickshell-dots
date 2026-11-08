@@ -1,0 +1,12 @@
+// Let sravan kill fprintd without authenticating, so the polkit prompt (the Quickshell bar's
+// AuthState) can stop a stuck fingerprint wait and go straight to the password. Only
+// fprintd.service, only "kill", only from his active local session. Worst case: a fingerprint
+// scan gets aborted.
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.freedesktop.systemd1.manage-units" &&
+        action.lookup("unit") == "fprintd.service" &&
+        action.lookup("verb") == "kill" &&
+        subject.user == "sravan" && subject.local && subject.active) {
+        return polkit.Result.YES;
+    }
+});
