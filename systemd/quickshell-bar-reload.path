@@ -11,6 +11,8 @@ PathChanged=%h/dev/quickshell/bar
 PathChanged=%h/dev/quickshell/bar/components
 PathChanged=%h/dev/quickshell/bar/modules
 PathChanged=%h/dev/quickshell/bar/shaders
+PathChanged=%h/dev/quickshell/bar/islands
+PathChanged=%h/dev/quickshell/bar/islands/panels
 Unit=quickshell-bar-reload.service
 
 [Install]

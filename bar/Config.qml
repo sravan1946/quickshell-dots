@@ -3,11 +3,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 
-// Shared bar state. Which pills hold which modules is Settings.layout (edited in Settings → Bar).
-//
-// To add a module: drop modules/Foo.qml (root an Item/Row, use components/Mod for
-// the look) and add "Foo" to a pill in Settings.defaults.layout; saved layouts pick it up
-// as its own pill.
+// Shared bar state.
 Singleton {
     readonly property int height: 30
     // pills sit this far off the bar's top and bottom edges; their hover/click areas reach

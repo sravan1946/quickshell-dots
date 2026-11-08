@@ -4,9 +4,10 @@
 // strength, the wave's timing, the cover-art colours and where each screen's wave starts. The
 // wave runs along the bar right above the window's top edge, so here it drops onto that edge
 // below where it passes, splits, and runs both ways round the border to meet at the bottom: a
-// bright comet on the border line with a bloom outside it, then a short afterglow along the
-// whole rim, the same flash + afterglow the bar's pills get. Timed on its own clock from the
-// kick, so nothing is sent per frame; the front matches the bar's (same easing and speed).
+// white-hot comet head on the border line (~45 ms) with a bloom outside it, then a thin line in
+// the kick's colour cooling towards the cover's second colour (~0.2 s), as the bar's islands
+// draw it (shaders/isle.frag). Timed on its own clock from the kick, so nothing is sent per
+// frame; the front matches the bar's (same easing and speed).
 //
 // Build: make (see Makefile). Load: hyprctl plugin load ~/.config/hypr/plugins/beatglow/beatglow.so
 
@@ -21,13 +22,15 @@
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/desktop/state/WindowState.hpp>
-#include <hyprland/src/desktop/view/Window.hpp>
+#include <hyprland/src/desktop/view/window/Window.hpp>
 #include <hyprland/src/event/EventBus.hpp>
 #include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/plugins/PluginAPI.hpp>
 #include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/render/Shader.hpp>
+#include <hyprland/src/render/WindowRenderPresentation.hpp>
+#include <hyprland/src/desktop/view/window/WindowPresentation.hpp>
 #include <hyprland/src/render/decorations/IHyprWindowDecoration.hpp>
 #include <hyprland/src/render/pass/PassElement.hpp>
 
@@ -47,7 +50,7 @@ static struct {
     std::array<SBeat, 4>          beats;              // newest first
     float                         dur   = 1.0f;       // the bar wave: s to run `reach` px,
     float                         reach = 2600.f;     // easing out (cubic)
-    std::array<float, 3>          c1 = {0.8f, 0.6f, 1.f}, c2 = {0.5f, 0.6f, 1.f};
+    std::array<float, 3>          c1 = {0.8f, 0.6f, 1.f}, c2 = {0.5f, 0.6f, 1.f};   // the kick's colour, the cover's second
     std::map<std::string, double> origins;            // monitor name -> global x the wave starts at
 } g_state;
 
@@ -66,8 +69,8 @@ static bool anyLive() {
 }
 
 // `beatglow beat <strength> <dur> <reach> <r1> <g1> <b1> <r2> <g2> <b2> [monitor=x ...]`
-static std::string onCommand(eHyprCtlOutputFormat, std::string req) {
-    std::istringstream in(req);
+static IPC::Socket1::SResponse onCommand(const IPC::Socket1::SRequest& req) {
+    std::istringstream in(req.command);
     std::string        cmd, sub;
     in >> cmd >> sub;
     if (sub != "beat")
@@ -154,47 +157,56 @@ void main() {
     float sc = gradient[4].w;
     float L  = 2.0 * (S.x + S.y - 4.0 * r) + 4.0 * HPI * r;
     float ex = clamp(gradient[4].x, r, S.x - r);
-    float ds = abs(perim(p, S, r) - (ex - r));
-    float pd = (abs(gradient[4].x - ex) + min(ds, L - ds)) / sc;
+    float h0 = abs(gradient[4].x - ex);
+    float cw = mod(perim(p, S, r) - (ex - r), L);   // clockwise from the start
+    float pd = (h0 + min(cw, L - cw)) / sc;
 
-    // the bar's wave slows to a stop at `reach`; stretch it (same start speed) so it gets
-    // all the way round this window
-    float far   = (abs(gradient[4].x - ex) + 0.5 * L) / sc + 60.0;
-    float reach = max(gradient[4].y, far);
-    float dur   = gradient[4].z * reach / gradient[4].y;
+    // along the top edge the front is the bar's own (its reach and dur), so both reach the
+    // window's top corners together. Past the corner, where the bar's wave slows to a stop, it
+    // carries on at the speed it had there and eases out round the rest of the window.
+    float reach = gradient[4].y, dur = gradient[4].z;
+    float ce = min((h0 + (cw <= L - cw ? S.x - r - ex : ex - r)) / sc, 0.85 * reach);   // to the top edge's end, this way
+    float R2 = (h0 + 0.5 * L) / sc + 60.0 - ce;   // the rest, to the far side
+    float D2 = R2 * dur / (reach * pow(1.0 - ce / reach, 2.0 / 3.0));   // same speed at the corner
+    float at = pd <= ce ? dur * (1.0 - pow(1.0 - pd / reach, 1.0 / 3.0))
+                       : dur * (1.0 - pow(1.0 - ce / reach, 1.0 / 3.0)) + D2 * (1.0 - pow(max(0.0, 1.0 - (pd - ce) / R2), 1.0 / 3.0));
 
     float flash = 0.0, after = 0.0;
     for (int k = 0; k < 4; k++) {
         float pw = gradient[1][k];
-        if (pw <= 0.0 || pd >= reach) continue;
-        float dt = gradient[0][k] - dur * (1.0 - pow(1.0 - pd / reach, 1.0 / 3.0));   // since the front passed
+        if (pw <= 0.0) continue;
+        float dt = gradient[0][k] - at;   // since the front passed
         if (dt < 0.0) {   // just ahead of it: a soft leading edge, no hard cut
             flash += pw * exp(dt / 0.012);
             continue;
         }
-        flash += pw * exp(-dt / 0.05);
-        after += pw * exp(-dt / 0.35);
+        flash += pw * exp(-dt / 0.045);
+        after += pw * 0.3 * exp(-dt / 0.22);
     }
     flash = min(flash, 1.0);
     after = min(after, 1.0);
     if (flash + after < 0.003) discard;
 
     vec3  c1 = gradient[2].rgb, c2 = gradient[3].rgb;
+    // the line cools from the kick's colour towards the cover's second, with more colour than the
+    // cover's pastels have (they go muddy dim); the head burns white
+    vec3  kc   = mix(c1, c2, 0.35 * after / (flash + after + 1e-4));
+    kc         = clamp(mix(vec3(dot(kc, vec3(0.299, 0.587, 0.114))), kc, 1.6), 0.0, 1.0);
     float aa = 0.75;
-    // the border line itself: a white-hot head, the cover colour behind it
+    // the border line itself
     float line = smoothstep(-thick - aa, -thick + aa, sd) * (1.0 - smoothstep(-aa, aa, sd));
-    float la   = line * min(1.0, flash * 0.95 + after * 0.45);
-    vec3  lc   = mix(c1, vec3(1.0), 0.55 * flash);
+    float la   = line * min(1.0, flash * 0.95 + after);
+    vec3  lc   = mix(kc, vec3(1.0), 0.6 * flash);
     // bloom outside it, mostly with the head
     float o    = max(sd, 0.0);
     float ba   = step(0.0, sd) * (exp(-o / (range * 0.22)) * 0.8 + exp(-o / (range * 0.55)) * 0.2)
-               * smoothstep(range, range * 0.7, o) * (flash * 0.6 + after * 0.12);
-    vec3  bc   = mix(c2, c1, flash);
+               * smoothstep(range, range * 0.7, o) * (flash * 0.6 + after * 0.4);
+    vec3  bc   = mix(kc, c1, flash);
     // a thin spill just inside, on the window's edge
     float ia   = step(sd, -thick) * exp((sd + thick) / (2.5 * sc)) * flash * 0.25;
 
     vec4 c = vec4(bc * ba, ba);
-    c = vec4(c1 * ia, ia) + c * (1.0 - ia);
+    c = vec4(kc * ia, ia) + c * (1.0 - ia);
     c = vec4(lc * la, la) + c * (1.0 - la);
     fragColor = c * alpha;
 }
@@ -223,16 +235,17 @@ class CBeatGlow;
 
 class CBeatGlowPass : public IPassElement {
   public:
-    CBeatGlowPass(CBeatGlow* deco, float a) : m_deco(deco), m_a(a) {}
-    std::vector<UP<IPassElement>> draw() override;
-    bool                          needsLiveBlur() override { return false; }
-    bool                          needsPrecomputeBlur() override { return false; }
+    CBeatGlowPass(CBeatGlow* deco, float a, const Render::SWindowRenderPresentation& pres) : m_deco(deco), m_a(a), m_pres(pres) {}
+    std::vector<UP<IPassElement>> draw(Render::CRenderContext& ctx) override;
+    bool                          needsLiveBlur(Render::CRenderContext&) override { return false; }
+    bool                          needsPrecomputeBlur(Render::CRenderContext&) override { return false; }
     const char*                   passName() override { return "CBeatGlowPass"; }
     ePassElementType              type() override { return EK_CUSTOM; }
 
   private:
-    CBeatGlow* m_deco;
-    float      m_a;
+    CBeatGlow*                        m_deco;
+    float                             m_a;
+    Render::SWindowRenderPresentation m_pres;
 };
 
 class CBeatGlow : public IHyprWindowDecoration {
@@ -256,19 +269,17 @@ class CBeatGlow : public IHyprWindowDecoration {
     void             updateWindow(PHLWINDOW) override { damageEntire(); }
 
     // the window's box on the layout, with its border and our bloom margin
-    CBox outerBox() {
+    CBox outerBox(const Render::SWindowRenderPresentation& pres) {
         const auto w = m_window.lock();
         auto       box = CBox{w->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT), w->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT)};
-        if (w->m_workspace && !w->m_pinned)
-            box.translate(w->m_workspace->m_renderOffset->value());
-        box.translate(w->m_floatingOffset);
-        return box.expand(w->getRealBorderSize() + GLOW);
+        box.translate(pres.workspaceOffset).translate(pres.floatingOffset);
+        return box.expand(w->presentation().borderSize() + GLOW);
     }
 
     void damageEntire() override {
         if (!validMapped(m_window))
             return;
-        g_pHyprRenderer->damageBox(outerBox().expand(2));
+        g_pHyprRenderer->damageBox(outerBox(m_window->presentation().renderPresentation()).expand(2));
     }
 
     bool shouldDraw() {
@@ -276,27 +287,27 @@ class CBeatGlow : public IHyprWindowDecoration {
         return validMapped(w) && w == Desktop::focusState()->window() && w->m_monitor && g_state.origins.contains(w->m_monitor->m_name) && anyLive();
     }
 
-    void draw(PHLMONITOR, float const& a) override {
+    void draw(Render::CRenderContext& ctx, PHLMONITOR, float const& a, const Render::SWindowRenderPresentation& pres) override {
         if (shouldDraw())
-            g_pHyprRenderer->m_renderPass.add(makeUnique<CBeatGlowPass>(this, a));
+            Render::IHyprRenderer::addPassElement(ctx, makeUnique<CBeatGlowPass>(this, a, pres));
     }
 
-    void drawPass(float a) {
+    void drawPass(Render::CRenderContext& ctx, float a, const Render::SWindowRenderPresentation& pres) {
         const auto w   = m_window.lock();
-        const auto mon = g_pHyprRenderer->m_renderData.pMonitor.lock();
+        const auto mon = ctx.m_data.pMonitor.lock();
         const auto sh  = shader();
-        if (!w || !mon || !sh || !w->m_monitor || !g_state.origins.contains(w->m_monitor->m_name) || g_pHyprRenderer->m_renderData.damage.empty())
+        if (!w || !mon || !sh || !w->m_monitor || !g_state.origins.contains(w->m_monitor->m_name) || ctx.m_data.damage.empty())
             return;
 
         const float sc     = mon->m_scale;
-        const auto  border = w->getRealBorderSize();
-        const auto  layout = outerBox();   // layout coords
+        const auto  border = w->presentation().borderSize();
+        const auto  layout = outerBox(pres);   // layout coords
         CBox        box    = layout.copy().translate(-mon->m_position).scale(sc).round();
-        g_pHyprRenderer->m_renderData.renderModif.applyToBox(box);
+        ctx.m_data.renderModif.applyToBox(box);
         if (box.width < 1 || box.height < 1)
             return;
 
-        const float rounding = w->rounding() > 0 ? (w->rounding() + border) * sc : 0;
+        const float rounding = w->presentation().rounding() > 0 ? (w->presentation().rounding() + border) * sc : 0;
         // wave origin (the window's own screen's, even where it spills onto another), px from
         // the border box's left edge
         const float ox = (g_state.origins.at(w->m_monitor->m_name) - (layout.x + GLOW)) * sc;
@@ -319,7 +330,7 @@ class CBeatGlow : public IHyprWindowDecoration {
         const bool blend = glIsEnabled(GL_BLEND);
         g_pHyprOpenGL->blend(true);
         g_pHyprOpenGL->useShader(sh);
-        sh->setUniformMatrix3fv(SHADER_PROJ, 1, GL_TRUE, g_pHyprRenderer->projectBoxToTarget(box).getMatrix());
+        sh->setUniformMatrix3fv(SHADER_PROJ, 1, GL_TRUE, g_pHyprRenderer->projectBoxToTarget(ctx, box).getMatrix());
         sh->setUniformFloat2(SHADER_FULL_SIZE, box.width, box.height);
         sh->setUniformFloat(SHADER_RADIUS, rounding);
         sh->setUniformFloat(SHADER_THICK, border * sc);
@@ -328,32 +339,32 @@ class CBeatGlow : public IHyprWindowDecoration {
         sh->setUniform4fv(SHADER_GRADIENT, 10, data);
 
         glBindVertexArray(sh->getUniformLocation(SHADER_SHADER_VAO));
-        CRegion region = g_pHyprRenderer->m_renderData.damage.copy().intersect(box);
-        if (g_pHyprRenderer->m_renderData.clipBox.width != 0 && g_pHyprRenderer->m_renderData.clipBox.height != 0)
-            region.intersect(g_pHyprRenderer->m_renderData.clipBox);
-        region.forEachRect([](const auto& rect) {
-            g_pHyprOpenGL->scissor(&rect, g_pHyprRenderer->m_renderData.transformDamage);
+        CRegion region = ctx.m_data.damage.copy().intersect(box);
+        if (ctx.m_data.clipBox.width != 0 && ctx.m_data.clipBox.height != 0)
+            region.intersect(ctx.m_data.clipBox);
+        region.forEachRect([&ctx](const auto& rect) {
+            g_pHyprOpenGL->scissor(ctx, &rect, ctx.m_data.transformDamage);
             glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
         });
         glBindVertexArray(0);
-        g_pHyprOpenGL->scissor(nullptr);
+        g_pHyprOpenGL->scissor(ctx, nullptr);
         g_pHyprOpenGL->blend(blend);
     }
 
     PHLWINDOWREF m_window;
 };
 
-std::vector<UP<IPassElement>> CBeatGlowPass::draw() {
-    m_deco->drawPass(m_a);
+std::vector<UP<IPassElement>> CBeatGlowPass::draw(Render::CRenderContext& ctx) {
+    m_deco->drawPass(ctx, m_a, m_pres);
     return {};
 }
 
 // ---- plugin ----------------------------------------------------------------------------------
 
 static void decorate(PHLWINDOW w) {
-    if (std::ranges::any_of(w->m_windowDecorations, [](const auto& d) { return d->getDisplayName() == "beatglow"; }))
+    if (std::ranges::any_of(w->presentation().decorations(), [](const auto& d) { return d->getDisplayName() == "beatglow"; }))
         return;
-    HyprlandAPI::addWindowDecoration(PHANDLE, w, makeUnique<CBeatGlow>(w));
+    HyprlandAPI::addWindowDecoration(PHANDLE, w, makeShared<CBeatGlow>(w));
 }
 
 APICALL EXPORT std::string PLUGIN_API_VERSION() {
@@ -368,7 +379,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         throw std::runtime_error("[beatglow] version mismatch");
     }
 
-    HyprlandAPI::registerHyprCtlCommand(PHANDLE, SHyprCtlCommand{.name = "beatglow", .exact = false, .fn = onCommand});
+    HyprlandAPI::registerHyprCtlCommand(PHANDLE, IPC::Socket1::SCommand{.name = "beatglow", .match = IPC::Socket1::COMMAND_MATCH_PREFIX, .handler = onCommand});
 
     static auto onOpen = Event::bus()->m_events.window.open.listen([](PHLWINDOW w) { decorate(w); });
     // keep frames coming on the focused window while a beat is still lighting it
@@ -376,19 +387,19 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         if (!anyLive())
             return;
         if (const auto w = Desktop::focusState()->window(); w && validMapped(w))
-            for (const auto& d : w->m_windowDecorations)
+            for (const auto& d : w->presentation().decorations())
                 if (d->getDisplayName() == "beatglow")
                     d->damageEntire();
     });
 
     for (const auto& w : Desktop::windowState()->windows())
-        if (w->m_isMapped && !w->isHidden())
+        if (w->mapped() && !w->isHidden())
             decorate(w);
 
     return {"beatglow", "The Quickshell bar's beat wave on the focused window's border", "sravan", "1.0"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
-    g_pHyprRenderer->m_renderPass.removeAllOfType("CBeatGlowPass");
+    Render::IHyprRenderer::currentPass(g_pHyprRenderer->context()).removeAllOfType("CBeatGlowPass");
     g_shader.reset();
 }

@@ -5,16 +5,16 @@ import Quickshell.Hyprland
 import Quickshell.Services.Pipewire
 import qs
 
-// Volume / mic / brightness OSD on the focused monitor. It reacts to the value
-// changing, whoever changed it: bar scroll, media keys (hyde-shell), pavucontrol.
+// Microphone OSD on the focused monitor (volume and brightness show as a level in the island
+// bar, islands/IslandBar.qml). It reacts to the value changing, whoever changed it: media
+// keys (hyde-shell), pavucontrol.
 // hyde-shell's notify-send OSD is switched off in ~/.local/state/hyde/config
 // (VOLUME_NOTIFY / BRIGHTNESS_NOTIFY), so only this one shows.
 Scope {
     id: osd
 
-    readonly property var sink: Pipewire.defaultAudioSink
     readonly property var src: Pipewire.defaultAudioSource
-    PwObjectTracker { objects: [osd.sink, osd.src] }
+    PwObjectTracker { objects: [osd.src] }
 
     property int icon: 0
     property string label: ""
@@ -34,29 +34,15 @@ Scope {
     }
     Timer { id: hide; interval: Settings.osdTimeout; onTriggered: osd.shown = false }
 
-    function showSink() {
-        const a = sink.audio, v = a.volume
-        show(a.muted ? 0xF0581 : Util.headphones(sink) ? 0xF02CB : v < 0.34 ? 0xF057F : v < 0.67 ? 0xF0580 : 0xF057E,
-             sink.description || sink.name, v, a.muted)
-    }
     function showSrc() {
         const a = src.audio
         show(a.muted ? 0xF036D : 0xF036C, src.description || src.name, a.volume, a.muted)
     }
 
     Connections {
-        target: osd.sink?.audio ?? null
-        function onVolumeChanged() { osd.showSink() }
-        function onMutedChanged() { osd.showSink() }
-    }
-    Connections {
         target: osd.src?.audio ?? null
         function onVolumeChanged() { osd.showSrc() }
         function onMutedChanged() { osd.showSrc() }
-    }
-    Connections {
-        target: Brightness
-        function onPctChanged() { osd.show(Brightness.pct < 50 ? 0xF00DF : 0xF00E0, "Brightness", Brightness.pct / 100, false) }
     }
 
     PanelWindow {

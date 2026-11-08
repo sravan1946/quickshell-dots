@@ -6,6 +6,7 @@ import Quickshell.Hyprland
 import Quickshell.Wayland
 import Quickshell.Services.Notifications
 import qs
+import qs.islands
 
 // Popup-only notification daemon (replaces dunst/swaync). Colours come from Theme,
 // so HyDE theme switches recolour it like the bar.
@@ -43,11 +44,17 @@ Scope {
             if (server.trackedNotifications.values.length === 0 || root.lost) root.place()
             if (!Config.historyPaused) History.add(n)
             n.tracked = !(Config.historyOpen && !Config.historyPaused)
+            // the island bar drops it out of its bell instead; under do-not-disturb it waits
+            if (n.tracked && Settings.notifDrop && !Config.dnd) NoteState.take(n)
         }
     }
-    // opening the history panel clears live popups: they are all in the history
+    // opening the history panel clears live popups: they are all in the history. Turning
+    // do-not-disturb off drops what it held out of the bell, together
     Connections {
         target: Config
+        function onDndChanged() {
+            if (!Config.dnd && Settings.notifDrop) [...server.trackedNotifications.values].forEach(n => NoteState.take(n))
+        }
         function onHistoryOpenChanged() {
             if (Config.historyOpen && !Config.historyPaused) [...server.trackedNotifications.values].forEach(n => n.tracked = false)
         }
@@ -154,9 +161,12 @@ Scope {
                 // (a binding here plus opacity animations in add/remove fought each frame)
                 opacity: 1 - Math.max(0, Math.min(card.x / card.width, 1))
                 readonly property bool critical: modelData.urgency === NotificationUrgency.Critical
+                // the island bar's bell shows them all (Settings.notifDrop): nothing here
+                readonly property bool dropped: Settings.notifDrop || NoteState.drops.includes(modelData)
+                visible: !dropped
 
                 width: list.width
-                height: content.implicitHeight + 24
+                height: dropped ? 0 : content.implicitHeight + 24
                 radius: Theme.radius
                 color: hover.hovered ? Qt.lighter(Theme.mainBg, 1.3) : Theme.mainBg
                 Behavior on color { ColorAnimation { duration: 150 } }
@@ -164,7 +174,7 @@ Scope {
 
                 // expireTimeout arrives in ms (the docs say seconds); <= 0 means server default; critical never expires
                 Timer {
-                    running: !hover.hovered && !card.critical && !Config.dnd
+                    running: !hover.hovered && !card.critical && !Config.dnd && !card.dropped
                     interval: card.modelData.expireTimeout > 0 ? card.modelData.expireTimeout : Settings.notifTimeout
                     onTriggered: card.modelData.tracked = false
                 }
@@ -298,7 +308,7 @@ Scope {
         // only worth a button when there is a stack to clear; sits above it
         Rectangle {
             id: clearAll
-            readonly property bool shown: !Config.dnd && list.count > 1
+            readonly property bool shown: !Config.dnd && list.count - NoteState.drops.length > 1
             opacity: shown ? 1 : 0
             visible: opacity > 0
             Behavior on opacity { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }

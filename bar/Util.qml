@@ -5,6 +5,11 @@ import Quickshell.Bluetooth
 
 Singleton {
     function run(cmd) { Quickshell.execDetached(["sh", "-c", cmd]) }
+    // a Pipewire node's volume (0..1) and mute, through wpctl: Quickshell's own setters leave a
+    // Bluetooth sink's channel volumes empty (its volume reads NaN until a restart) and never
+    // reach the device. What wpctl changes Quickshell reads back fine.
+    function setVolume(node, v) { if (node) Quickshell.execDetached(["wpctl", "set-volume", String(node.id), Math.max(0, Math.min(1, v)).toFixed(3)]) }
+    function setMuted(node, m) { if (node) Quickshell.execDetached(["wpctl", "set-mute", String(node.id), m ? "1" : "0"]) }
 
     // A Bluetooth sink's node carries no form factor: look its MAC (bluez_output.40_72_….1)
     // up in BlueZ, whose icon says headset/headphones or speaker

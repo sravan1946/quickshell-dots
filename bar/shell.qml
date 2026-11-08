@@ -4,7 +4,9 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import Quickshell.Bluetooth
 import Quickshell.Services.UPower
+import qs.islands
 
 ShellRoot {
     // qs -c bar ipc call bar toggle   (replaces `waybar.py --hide`)
@@ -20,7 +22,6 @@ ShellRoot {
 
     Notifications {}
     Osd {}
-    NowPlaying {}
 
     // one critical notification per discharge once the battery hits Settings.batteryLow (the pill turns red too)
     Connections {
@@ -37,6 +38,24 @@ ShellRoot {
         }
     }
 
+    // Quickshell can miss a device that connects while it first syncs with BlueZ (the mouse at
+    // boot, a second after the bar) and keep it "disconnected" until restarted. So once, a bit
+    // after start, check BlueZ's own list and restart if they disagree; the stamp in /run (gone
+    // at reboot) keeps a lasting disagreement from turning into a restart loop
+    Timer { interval: 10000; running: true; onTriggered: btCheck.running = true }
+    Process {
+        id: btCheck
+        command: ["bluetoothctl", "devices", "Connected"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const ours = Bluetooth.devices.values.filter(d => d.connected).map(d => d.address)
+                const missed = text.split("\n").map(l => l.split(" ")[1]).filter(a => a && !ours.includes(a))
+                if (missed.length) Quickshell.execDetached(["sh", "-c",
+                    'f="$XDG_RUNTIME_DIR/qs-bar-bt-resync"; [ -e "$f" ] || { touch "$f"; systemctl --user --no-block restart quickshell-bar; }'])
+            }
+        }
+    }
+
     BeatGlow {}
 
     // one settings GUI for all monitors; opens on the focused one via Config.openSettings()
@@ -48,12 +67,9 @@ ShellRoot {
         function toggle(): void { Config.toggleQuick() }
     }
 
+    // the island bar (islands/IslandBar.qml): its music card replaces the Now Playing panel
     Variants {
         model: Quickshell.screens
-        Bar {}
-    }
-    Variants {
-        model: Quickshell.screens
-        QuickSettings {}
+        IslandBar {}
     }
 }

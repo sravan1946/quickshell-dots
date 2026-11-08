@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tune the bar's kick detector (Visualizer.detect) on your own music.
+"""Tune the bar's kick detector (scripts/kicks.py) on your own music.
 
   kicktune.py record [--minutes 30]    # play music meanwhile; Ctrl-C stops early
   kicktune.py tune [DIR ...] [--apply] # all recordings by default; --apply sets the winners
@@ -7,17 +7,16 @@
 
 record saves, side by side under ~/.cache/quickshell-kicktune/<time>/:
   audio.raw   what the default sink plays (pw-cat, mono s16 at 2 kHz: plenty for a kick)
-  cava.txt    a second cava on the bar's own cava.conf, each frame stamped with its arrival time
+  cava.txt    a cava on the bar's own cava.conf, each frame stamped with its arrival time
   meta.txt    play state + track, polled every second
 
 tune takes the kicks heard in the audio as the truth: onsets of the 40-130 Hz band
-(bandpass, 30 ms energy, rise over 30 ms, adaptive threshold). cava trails the audio by its own
-buffering (~150 ms), so each track's lag is measured and taken off. Then a Python copy of
-detect() is replayed on the cava frames and searched one parameter at a time, scored by F1
-(a detection within 70 ms of a kick), averaged per track so a long one doesn't dominate.
-beatSens/beatFloor/beatGap are Settings (--apply sets them on the running bar); the rise span,
-EMA window and bass bands are code in Visualizer.qml, so for those it says what to change.
-Pure stdlib: no numpy on the box.
+(bandpass, 30 ms energy, rise over 30 ms, a threshold from the flux around it, peak-picked:
+it may look ahead, which the live detector can't). kicks.py's Detector is replayed on the same
+audio and its floor and gap searched one at a time, scored by F1 (a detection within 70 ms of
+a kick, after the shift that suits it best: the live one fires once it has heard the rise),
+averaged per track so a long one doesn't dominate. They are Settings.kickFloor/kickGap
+(--apply sets them on the running bar). Pure stdlib: no numpy on the box.
 """
 import array
 import bisect
@@ -31,21 +30,19 @@ import sys
 import threading
 import time
 
+import kicks as live
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.expanduser("~/.cache/quickshell-kicktune")
 RATE = 2000          # audio sample rate
 HOP = 20             # 10 ms
 TOL = 0.07           # s: a detection this close to a kick counts
-CURRENT = {"sens": 0, "floor": 0.02, "gap": 0.23, "span": 2, "ema": 270, "bands": 6}   # code + Settings defaults
+CURRENT = {"floor": 4.0, "gap": 0.18}   # Settings defaults
 GRID = {
-    "sens": [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 1.0, 1.2, 1.5, 2.0],
-    "floor": [0, 0.005, 0.01, 0.015, 0.02, 0.03, 0.04, 0.06],
-    "gap": [0.1, 0.13, 0.16, 0.2, 0.23, 0.26, 0.3, 0.35],
-    "span": [1, 2, 3],
-    "ema": [30, 45, 60, 90, 135, 180, 270],
-    "bands": [2, 4, 6, 8],
+    "floor": [2.0, 3.0, 4.0, 5.0, 6.0, 8.0],
+    "gap": [0.12, 0.15, 0.18, 0.2, 0.23, 0.26, 0.3],
 }
-SETTING = {"sens": "beatSens", "floor": "beatFloor", "gap": "beatGap"}
+SETTING = {"floor": "kickFloor", "gap": "kickGap"}
 try:   # what the bar runs now, not just its defaults
     _saved = json.load(open(os.path.expanduser("~/.config/quickshell-bar/settings.json")))
     CURRENT.update({k: _saved[name] for k, name in SETTING.items() if name in _saved})
@@ -229,24 +226,21 @@ def kicks(samples, t0):
 
 # ---------------- the bar's detector ----------------
 
-def bass(frames, n):
-    lo = 16 - n // 2
-    return [sum(v[lo:lo + n]) / n for _, v in frames]
+def levels(samples):
+    """The band level (dB) per hop, as kicks.Detector computes it: what its decisions replay on."""
+    d, out = live.Detector(), []
+    d.step = lambda level: out.append(level)
+    d.push([v / 32768 for v in samples])
+    return out
 
 
-def detect(times, b, p):
-    """Visualizer.detect(), parameterised: beat times."""
-    span, a = p["span"], 1 / p["ema"]
-    mean = var = 0.0
-    last, out = -1e9, []
-    for i in range(len(b)):
-        d = max(0.0, b[i] - b[i - span]) if i >= span else 0.0
-        thr = mean + p["sens"] * math.sqrt(var) + p["floor"]
-        if d > thr and times[i] - last >= p["gap"]:
-            last = times[i]
-            out.append(last)
-        mean += (d - mean) * a
-        var += ((d - mean) * (d - mean) - var) * a
+def detect(lv, p):
+    """kicks.Detector with floor/gap `p` on recorded levels: s into the audio of each kick."""
+    d, out = live.Detector(p["floor"], p["gap"]), []
+    for n, level in enumerate(lv):
+        k = d.step(level)
+        if k:
+            out.append((n * live.HOP + live.WIN) / RATE - k[1])
     return out
 
 
@@ -266,47 +260,32 @@ def score(det, truth, tol=TOL):
     return p, r, (2 * p * r / (p + r) if p + r else 0.0)
 
 
-def lag(truth, times, b):
-    """How far cava's rises trail the audio's kicks: the shift (0-400 ms) under which the most
-    kicks have a rise starting within 40 ms."""
-    d = [max(0.0, b[i] - b[i - 2]) if i >= 2 else 0.0 for i in range(len(b))]
-    m = sum(d) / len(d)
-    sd = math.sqrt(sum((v - m) ** 2 for v in d) / len(d))
-    starts = [times[i] for i in range(1, len(d)) if d[i] > m + 0.5 * sd >= d[i - 1]]
-    best = max(range(0, 401, 10), key=lambda ms: score(starts, [k + ms / 1000 for k in truth], 0.04)[1])
-    return best / 1000
-
-
 # ---------------- tune ----------------
 
 def prepare(dirs):
     tracks = []
     for d in dirs:
         a, at, frames, meta = load(d)
-        if not frames:
-            continue
-        print(f"{d}: {len(a) / RATE / 60:.1f} min audio, {len(frames)} cava frames")
-        for start, stop, name in segments(meta, frames[-1][0]):
-            fr = [f for f in frames if start <= f[0] <= stop]
+        end = at(len(a))
+        print(f"{d}: {len(a) / RATE / 60:.1f} min audio")
+        for start, stop, name in segments(meta, end):
             i0, i1 = index(at, start, len(a)), index(at, stop, len(a))
-            if len(fr) < 300 or i1 - i0 < RATE * 10:
+            if i1 - i0 < RATE * 10:
                 continue
-            truth = [at(i0 + k * RATE) for k in kicks(a[i0:i1], 0.0)]
+            truth = kicks(a[i0:i1], 0.0)
             if len(truth) < 10:
                 print(f"  skip {name!r}: {len(truth)} kicks heard")
                 continue
-            times = [t for t, _ in fr]
-            L = lag(truth, times, bass(fr, 6))
-            truth = [k + L for k in truth]
-            bpm = 60 * len(truth) / (stop - start)
-            print(f"  {name[:60]!r}: {stop - start:.0f} s, {len(truth)} kicks (~{bpm:.0f}/min), cava lag {L * 1000:.0f} ms")
-            tracks.append({"name": name, "times": times, "frames": fr, "truth": truth,
-                           "bass": {n: bass(fr, n) for n in GRID["bands"]}})
+            print(f"  {name[:60]!r}: {stop - start:.0f} s, {len(truth)} kicks (~{60 * len(truth) / (stop - start):.0f}/min)")
+            tracks.append({"name": name, "truth": truth, "levels": levels(a[i0:i1])})
     return tracks
 
 
 def evaluate(tracks, p):
-    rows = [score(detect(t["times"], t["bass"][p["bands"]], p), t["truth"]) for t in tracks]
+    rows = []
+    for t in tracks:
+        det = detect(t["levels"], p)
+        rows.append(max((score(det, [k + ms / 1000 for k in t["truth"]]) for ms in range(0, 101, 10)), key=lambda r: r[2]))
     return tuple(sum(r[k] for r in rows) / len(rows) for k in range(3)), rows
 
 
@@ -338,17 +317,11 @@ def tune(dirs, apply):
     print(f"current: F1 {f0:.3f} (precision {p0:.2f}, recall {r0:.2f})")
     print(f"tuned:   F1 {f1:.3f} (precision {p1:.2f}, recall {r1:.2f})\n")
     for k in GRID:
-        mark = "" if best[k] == CURRENT[k] else "   <- " + (f"Settings.{SETTING[k]}" if k in SETTING else "code")
+        mark = "" if best[k] == CURRENT[k] else f"   <- Settings.{SETTING[k]}"
         print(f"  {k:6} {CURRENT[k]!s:>6} -> {best[k]!s:<6}{mark}")
     print("\nper track (current -> tuned F1):")
     for t, a, b in sorted(zip(tracks, rows0, rows1), key=lambda x: x[2][2]):
         print(f"  {a[2]:.2f} -> {b[2]:.2f}  {t['name'][:70]}")
-    code = {k: best[k] for k in GRID if k not in SETTING and best[k] != CURRENT[k]}
-    if code:
-        print("\nVisualizer.qml changes for the rest:"
-              + (f"\n  rise span {best['span']} frames: prevBass{'2' if CURRENT['span'] == 2 else ''} chain in detect()" if "span" in code else "")
-              + (f"\n  EMA window: the two `/ 90` in detect() -> / {best['ema']}" if "ema" in code else "")
-              + (f"\n  bands: detect() gets the middle {best['bands']} of lv[] (now lv[13..18])" if "bands" in code else ""))
     json.dump({"current": CURRENT, "tuned": best, "f1": [f0, f1], "tracks": len(tracks)},
               open(os.path.join(ROOT, "last-tune.json"), "w"), indent=2)
     if apply:
@@ -374,15 +347,8 @@ def demo():
     p, r, f = score(found, at, 0.03)
     assert f > 0.95, (p, r, found[:5], at[:5])
 
-    times = [i / 30 for i in range(600)]   # cava-ish: bass jumps on each kick, decays between
-    b, v, ks = [], 0.1, [int(k * 30) + 4 for k in at]
-    for i in range(600):
-        v = 0.8 if i in ks else max(0.1, v * 0.85)
-        b.append(v)
-    det = detect(times, b, CURRENT)
-    assert score(det, [i / 30 for i in ks], 0.04)[2] > 0.95, det[:5]
-    assert 0.1 <= lag(at, times, b) <= 0.17, lag(at, times, b)
-
+    det = detect(levels([int(v * 32767) for v in x]), CURRENT)
+    assert max(score(det, [k + ms / 1000 for k in at])[2] for ms in range(0, 101, 10)) > 0.95, det[:5]
 
 if __name__ == "__main__":
     args = sys.argv[1:]

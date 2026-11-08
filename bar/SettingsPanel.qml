@@ -1,65 +1,32 @@
 import QtQuick
-import QtQuick.Layouts
 import Quickshell
 import Quickshell.Io
-import Quickshell.Hyprland
-import qs
-import qs.components
+import qs.islands
 
-// Central settings GUI, opened by Config.openSettings() (the quick-settings tile) or IPC.
-// A normal floating window ("Bar Settings", floated by a rule in hyprland.lua): move it
-// with SUPER+drag or by dragging the sidebar header, close it with the X, Escape or the
-// compositor. A category sidebar and the chosen page of editors. Every control is two-way
-// bound to Settings.* (which debounce-persists) or to live Config state, so an external
-// change or a reset() shows up at once.
+// Settings, opened from quick settings (the cog), Config.openSettings() or IPC. A normal
+// floating window ("Bar Settings", floated by a rule in hyprland.lua): drag the header to move
+// it, Escape or the compositor closes it. Pages along the top; every control is two-way bound
+// to Settings.* (which saves itself), so a reset or an IPC `set` shows up at once.
 Scope {
     id: root
 
     property bool open: false
     property int page: 0
-    property string selMod: ""   // module picked in Bar → Layout
-    // on the Media page the Now Playing panel is held open under the pill on the focused
-    // monitor: every style choice shows live on the real pill and panel
-    readonly property bool previewing: open && pages[page].title === "Media"
-    onPreviewingChanged: {
-        Player.pinned = previewing
-        if (previewing) {
-            const s = Quickshell.screens.find(s => s.name === Hyprland.focusedMonitor?.name) ?? Quickshell.screens[0]
-            Player.showAtPill(s)
-        } else Player.open = false
-    }
+    readonly property var pages: ["Bar", "System", "Media", "Alerts", "Colours"]
+    onOpenChanged: Config.settingsOpen = open
 
-    readonly property var pages: [
-        { title: "Bar",           icon: 0xF0570 },   // dock-top
-        { title: "Theme",         icon: 0xF03D8 },   // palette
-        { title: "System",        icon: 0xF0EE0 },   // cpu
-        { title: "Media",         icon: 0xF075A },   // music
-        { title: "Panels",        icon: 0xF0328 },   // layers
-        { title: "Alerts",        icon: 0xF009A },   // bell
-    ]
-    // friendlier names for the module chips
-    readonly property var moduleNames: ({ SysStats: "System stats", Idle: "Caffeine", Dnd: "Notifications", Backlight: "Brightness" })
-
-    // reflect open state so other surfaces (e.g. the OSD) can stay quiet, mirroring Config.quickOpen
-    onOpenChanged: {
-        Config.settingsOpen = open
-        card.progress = open ? 1 : 0   // a normal window: no pour, the compositor animates it
-    }
-
-    // `qs -c bar ipc call settings toggle`, or `... page media` to open on a page
+    // `qs -c bar ipc call settings toggle`, `... page media`, `... set hoverDelay 200`
     IpcHandler {
         target: "settings"
         function toggle(): void { Config.openSettings() }
-        // `... set mediaStyle 2`: any Settings key, value as JSON (saved like a GUI change)
         function set(key: string, value: string): void {
             if (Settings.defaults[key] !== undefined) Settings[key] = JSON.parse(value)
         }
         function page(name: string): void {
-            root.page = Math.max(0, root.pages.findIndex(p => p.title.toLowerCase() === name.toLowerCase()))
+            root.page = Math.max(0, root.pages.findIndex(p => p.toLowerCase() === name.toLowerCase()))
             if (!root.open) Config.openSettings()
         }
     }
-
     Connections {
         target: Config
         function onOpenSettings() { root.open = !root.open }
@@ -69,968 +36,296 @@ Scope {
         id: win
         title: "Bar Settings"
         visible: root.open
-        implicitWidth: 620
-        implicitHeight: 540
-        minimumSize: Qt.size(620, 480)   // the pages are laid out for 620 wide
+        implicitWidth: 560
+        implicitHeight: 560
+        minimumSize: Qt.size(480, 420)
         color: "transparent"
-        onClosed: root.open = false   // closed by the compositor (killactive)
+        onClosed: root.open = false
 
-        Item {
+        Rectangle {
             anchors.fill: parent
+            radius: 18
+            color: Qt.alpha(Look.surface, 0.97)
+            border.width: 1
+            border.color: Look.line
             focus: root.open
             Keys.onEscapePressed: root.open = false
-        }
 
-        LiquidCard {
-            id: card
-            anchors.fill: parent
-            radius: Theme.radius + 5
-            color: Qt.alpha(Theme.mainBg, 0.98)
-            border.color: Qt.alpha(Theme.mainFg, 0.35)
-            border.width: 1
-
-
-            // ---- sidebar ----
-            Rectangle {
-                id: side
-                width: 168
-                height: parent.height
-                color: Qt.alpha(Theme.mainFg, 0.04)
-
-                // the header ("Settings") is the title bar: drag it to move the window
-                MouseArea {
-                    z: 1
-                    width: parent.width
-                    height: 50
-                    cursorShape: Qt.SizeAllCursor
-                    onPressed: win.startSystemMove()
-                }
-
-                Column {
-                    x: 12
-                    y: 16
-                    width: parent.width - 24
-                    spacing: 4
-
-                    Row {
-                        spacing: 10
-                        bottomPadding: 14
-                        leftPadding: 4
-                        Text {
-                            text: Theme.g(0xF0493)   // cog
-                            color: Theme.actBg
-                            font { family: Theme.font; pixelSize: 20 }
-                            anchors.verticalCenter: parent.verticalCenter
-                        }
-                        Text {
-                            text: "Settings"
-                            color: Theme.mainFg
-                            font { family: Theme.font; pixelSize: 15; bold: true }
-                            anchors.verticalCenter: parent.verticalCenter
-                        }
-                    }
-
-                    Item {
-                        width: parent.width
-                        height: pageList.height
-                        // highlight slides between pages
-                        Rectangle {
-                            width: parent.width
-                            height: 32
-                            radius: 10
-                            y: root.page * 36
-                            color: Qt.alpha(Theme.actBg, 0.22)
-                            border.color: Qt.alpha(Theme.actBg, 0.45)
-                            border.width: 1
-                            Behavior on y { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
-                        }
-                        Column {
-                            id: pageList
-                            width: parent.width
-                            spacing: 4
-                            Repeater {
-                                model: root.pages
-                                Item {
-                                    required property var modelData
-                                    required property int index
-                                    width: pageList.width
-                                    height: 32
-                                    HoverHandler { id: ph; cursorShape: Qt.PointingHandCursor }
-                                    TapHandler { onTapped: root.page = index }
-                                    Rectangle {
-                                        anchors.fill: parent
-                                        radius: 10
-                                        color: ph.hovered && root.page !== index ? Qt.alpha(Theme.mainFg, 0.08) : "transparent"
-                                    }
-                                    Row {
-                                        x: 10
-                                        spacing: 10
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        Text {
-                                            width: 18
-                                            text: Theme.g(modelData.icon)
-                                            color: root.page === index ? Theme.actFg : Theme.mainFg
-                                            font { family: Theme.font; pixelSize: 15 }
-                                        }
-                                        Text {
-                                            text: modelData.title
-                                            color: root.page === index ? Theme.actFg : Theme.mainFg
-                                            opacity: root.page === index || ph.hovered ? 1 : 0.75
-                                            font { family: Theme.font; pixelSize: 12; bold: root.page === index }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                PillButton {
-                    anchors { horizontalCenter: parent.horizontalCenter; bottom: parent.bottom; bottomMargin: 16 }
-                    text: Theme.g(0xF0450) + "  Reset all"
-                    onClicked: Settings.reset()
-                }
-            }
-
-            // ---- page ----
+            // ---- header: the title (drag it to move the window) and the pages ----
             Item {
-                id: pane
-                anchors { left: side.right; right: parent.right; top: parent.top; bottom: parent.bottom }
-
-                RowLayout {
-                    id: header
-                    anchors { top: parent.top; left: parent.left; right: parent.right; margins: 16; leftMargin: 22 }
-                    Text {
-                        Layout.fillWidth: true
-                        text: root.pages[root.page].title
-                        color: Theme.mainFg
-                        font { family: Theme.font; pixelSize: 15; bold: true }
-                    }
+                id: head
+                width: parent.width
+                height: 64
+                MouseArea { anchors.fill: parent; cursorShape: Qt.SizeAllCursor; onPressed: win.startSystemMove() }
+                T { x: 20; anchors.verticalCenter: parent.verticalCenter; text: "Settings"; font.pixelSize: 15; font.weight: Font.Bold }
+                Rectangle {
+                    id: tabs
+                    anchors { right: parent.right; rightMargin: 16; verticalCenter: parent.verticalCenter }
+                    width: tabRow.implicitWidth + 6
+                    height: 32
+                    radius: 16
+                    color: Look.raise
+                    // the lit tab slides between pages
                     Rectangle {
-                        implicitWidth: 28; implicitHeight: 28
-                        radius: 14
-                        color: closeHover.hovered ? Qt.alpha(Theme.mainFg, 0.18) : "transparent"
-                        Behavior on color { ColorAnimation { duration: 120 } }
-                        HoverHandler { id: closeHover; cursorShape: Qt.PointingHandCursor }
-                        TapHandler { onTapped: root.open = false }
-                        Text {
-                            anchors.centerIn: parent
-                            text: Theme.g(0xF0156)   // close
-                            color: Theme.mainFg
-                            font { family: Theme.font; pixelSize: 15 }
-                        }
+                        readonly property Item at: tabRow.children[root.page] ?? null
+                        x: 3 + (at?.x ?? 0)
+                        y: 3
+                        width: at?.width ?? 0
+                        height: 26
+                        radius: 13
+                        color: Look.accent
+                        Behavior on x { Anim { type: "fast" } }
+                        Behavior on width { Anim { type: "fast" } }
                     }
-                }
-
-                Flickable {
-                    id: scroll
-                    anchors { top: header.bottom; topMargin: 10; left: parent.left; right: parent.right; bottom: parent.bottom; bottomMargin: 12; leftMargin: 22; rightMargin: 18 }
-                    clip: true
-                    contentWidth: width
-                    contentHeight: pageLoader.height
-                    boundsBehavior: Flickable.StopAtBounds
-
-                    Loader {
-                        id: pageLoader
-                        width: scroll.width
-                        sourceComponent: [barPage, themePage, systemPage, mediaPage, panelsPage, alertsPage][root.page]
-                        onSourceComponentChanged: { scroll.contentY = 0; swap.restart() }
-                        NumberAnimation { id: swap; target: pageLoader; property: "opacity"; from: 0; to: 1; duration: 180; easing.type: Easing.OutCubic }
-                    }
-                }
-            }
-        }
-    }
-
-    // ---------- pages ----------
-
-    Component {
-        id: barPage
-        ColumnLayout {
-            spacing: 12
-            SectionHeader { text: "Layout" }
-            Hint { text: "Click a module, then move it along the bar: it steps one place at a time, across pills and sides. Own pill splits it off; a pill left empty disappears." }
-            Repeater {
-                model: [["Left", "left"], ["Centre", "center"], ["Right", "right"]]
-                ColumnLayout {
-                    id: sideCol
-                    required property var modelData
-                    Layout.fillWidth: true
-                    spacing: 6
-                    Text {
-                        text: sideCol.modelData[0]
-                        color: Theme.mainFg
-                        opacity: 0.55
-                        font { family: Theme.font; pixelSize: 11 }
-                    }
-                    Flow {
-                        Layout.fillWidth: true
-                        spacing: 8
+                    Row {
+                        id: tabRow
+                        x: 3; y: 3
                         Repeater {
-                            model: Settings.barLayout[sideCol.modelData[1]]
-                            Rectangle {   // one pill
-                                id: pillBox
-                                required property var modelData
-                                width: chips.implicitWidth + 8
-                                height: chips.implicitHeight + 8
-                                radius: height / 2
-                                color: "transparent"
-                                border { width: 1; color: Qt.alpha(Theme.mainFg, 0.3) }
-                                Row {
-                                    id: chips
+                            model: root.pages
+                            Item {
+                                required property string modelData
+                                required property int index
+                                width: tl.implicitWidth + 24
+                                height: 26
+                                T {
+                                    id: tl
                                     anchors.centerIn: parent
-                                    spacing: 4
-                                    Repeater {
-                                        model: pillBox.modelData
-                                        PillButton {
-                                            required property string modelData
-                                            readonly property bool shown: Settings.moduleShown(modelData)
-                                            implicitHeight: 24
-                                            checked: root.selMod === modelData
-                                            opacity: shown ? 1 : 0.5
-                                            text: (shown ? "" : Theme.g(0xF0209) + " ") + (root.moduleNames[modelData] ?? modelData)
-                                            onClicked: root.selMod = checked ? "" : modelData
-                                        }
-                                    }
+                                    text: parent.modelData
+                                    font.pixelSize: Look.small
+                                    font.weight: Font.DemiBold
+                                    color: root.page === parent.index ? Look.accentInk : Look.dim
+                                    Behavior on color { Fade {} }
                                 }
+                                TapHandler { onTapped: root.page = parent.index }
+                                HoverHandler { cursorShape: Qt.PointingHandCursor }
                             }
                         }
                     }
                 }
             }
-            Flow {
-                Layout.fillWidth: true
-                spacing: 6
-                PillButton { visible: root.selMod !== ""; implicitHeight: 24; text: Theme.g(0xF004D) + " Move"; onClicked: Settings.moveModule(root.selMod, -1) }
-                PillButton { visible: root.selMod !== ""; implicitHeight: 24; text: "Move " + Theme.g(0xF0054); onClicked: Settings.moveModule(root.selMod, 1) }
-                PillButton { visible: root.selMod !== ""; implicitHeight: 24; text: "Own pill"; onClicked: Settings.moveModule(root.selMod, 0) }
-                PillButton {
-                    visible: root.selMod !== ""
-                    implicitHeight: 24
-                    text: Settings.moduleShown(root.selMod) ? "Hide" : "Show"
-                    onClicked: Settings.setModuleShown(root.selMod, !Settings.moduleShown(root.selMod))
-                }
-                PillButton { implicitHeight: 24; text: "Reset layout"; onClicked: Settings.layout = Settings.defaults.layout }
-            }
-            SectionHeader { text: "Clock" }
-            SettingToggle { label: "24-hour time"; checked: Settings.clock24h; onToggled: Settings.clock24h = !Settings.clock24h }
-            SettingToggle {
-                label: "Show seconds"
-                hint: "Only the clock ticks each second; the calendar stays on minutes"
-                checked: Settings.clockSeconds
-                onToggled: Settings.clockSeconds = !Settings.clockSeconds
-            }
-            Hint { text: "Week starts on" }
-            StyleChoice {
-                names: ["Locale", "Monday", "Sunday"]
-                value: Settings.weekStart
-                onPicked: i => Settings.weekStart = i
-            }
-            SettingSlider {
-                label: "Calendar refresh"
-                suffix: " min"
-                from: 1; to: 60; step: 1
-                value: Settings.calRefresh
-                onEdited: v => Settings.calRefresh = v
-            }
-            SettingSlider {
-                label: "Join lights up"
-                suffix: " min"
-                from: 0; to: 30; step: 1
-                value: Settings.meetLead
-                onEdited: v => Settings.meetLead = v
-            }
-            Hint { text: "How long before a meeting its Join button in the calendar turns solid." }
-            SectionHeader { text: "Visibility" }
-            SettingToggle {
-                label: "Show the bar"
-                hint: "Also SUPER+CTRL+B"
-                checked: Config.barVisible
-                onToggled: Config.barVisible = !Config.barVisible
-            }
-        }
-    }
 
-    Component {
-        id: themePage
-        ColumnLayout {
-            spacing: 12
-            SectionHeader { text: "Bar colours" }
-            Hint { text: "Pick a HyDE colour to follow theme and wallpaper switches, or type a #hex to fix it (8 digits put alpha first: #AARRGGBB). Every colour in these settings works the same way." }
-            ColorRow { label: "Bar background"; value: Settings.themeBarBg; onEdited: v => Settings.themeBarBg = v }
-            ColorRow { label: "Pill background"; value: Settings.themeMainBg; onEdited: v => Settings.themeMainBg = v }
-            ColorRow { label: "Text"; value: Settings.themeMainFg; onEdited: v => Settings.themeMainFg = v }
-            ColorRow { label: "Active"; value: Settings.themeActBg; onEdited: v => Settings.themeActBg = v }
-            ColorRow { label: "Active text"; value: Settings.themeActFg; onEdited: v => Settings.themeActFg = v }
-            ColorRow { label: "Hover"; value: Settings.themeHvrBg; onEdited: v => Settings.themeHvrBg = v }
-            ColorRow { label: "Hover text"; value: Settings.themeHvrFg; onEdited: v => Settings.themeHvrFg = v }
-            ColorRow { label: "Menu text"; value: Settings.themeMenuFg; onEdited: v => Settings.themeMenuFg = v }
-        }
-    }
-
-    Component {
-        id: systemPage
-        ColumnLayout {
-            spacing: 12
-            SectionHeader { text: "System stats" }
-            SettingSlider {
-                label: "Sample every"
-                suffix: " s"
-                decimals: 1
-                from: 1; to: 10; step: 0.5
-                value: Settings.sysInterval / 1000
-                onEdited: v => Settings.sysInterval = Math.round(v * 1000)
-            }
-            SettingToggle {
-                label: "Rolling numbers"
-                hint: "Off saves a little CPU: each roll repaints the bar"
-                checked: Settings.numberRoll
-                onToggled: Settings.numberRoll = !Settings.numberRoll
-            }
-            ColorRow { label: "CPU colour"; value: Settings.sysColCpu; onEdited: v => Settings.sysColCpu = v }
-            ColorRow { label: "RAM colour"; value: Settings.sysColRam; onEdited: v => Settings.sysColRam = v }
-            ColorRow { label: "Temp colour"; value: Settings.sysColTemp; onEdited: v => Settings.sysColTemp = v }
-
-            SectionHeader { text: "Network graph" }
-            ColorRow { label: "Download colour"; value: Settings.netColDown; onEdited: v => Settings.netColDown = v }
-            ColorRow { label: "Upload colour"; value: Settings.netColUp; onEdited: v => Settings.netColUp = v }
-            SettingSlider {
-                label: "Sample every"
-                suffix: " s"
-                decimals: 1
-                from: 1; to: 10; step: 0.5
-                value: Settings.netInterval / 1000
-                onEdited: v => Settings.netInterval = Math.round(v * 1000)
-            }
-        }
-    }
-
-    Component {
-        id: mediaPage
-        ColumnLayout {
-            spacing: 12
-            Hint { visible: !Player.player; text: "Play something to preview these live on the pill and the panel." }
-            SectionHeader { text: "Now playing pill" }
-            Hint { text: "What the pill draws from the music behind or beside the title." }
-            StyleChoice {
-                names: ["Columns", "Ambient", "Mini EQ", "Strip", "Waveform"]
-                value: Settings.mediaStyle
-                onPicked: i => Settings.mediaStyle = i
-            }
-            SectionHeader { text: "Now playing panel" }
-            StyleChoice {
-                names: ["Turntable", "Poster", "Waveform", "Matrix", "Aurora"]
-                value: Settings.panelLayout
-                onPicked: i => Settings.panelLayout = i
-            }
-            Hint { visible: Settings.panelLayout === 0; text: "Turntable: what sits in the middle, and the spectrum around it." }
-            StyleChoice {
-                visible: Settings.panelLayout === 0
-                names: ["Vinyl", "Cover", "Orb"]
-                value: Settings.panelCenter
-                onPicked: i => Settings.panelCenter = i
-            }
-            StyleChoice {
-                visible: Settings.panelLayout === 0
-                names: ["Spokes", "Aura", "Liquid", "LED"]
-                value: Settings.panelStyle
-                onPicked: i => Settings.panelStyle = i
-            }
-            SectionHeader { text: "Beat effects" }
-            SettingToggle {
-                label: "React to the beat"
-                hint: "The wave along the bar, pill rims, window-border glow and sparks"
-                checked: Settings.beatEffects
-                onToggled: Settings.beatEffects = !Settings.beatEffects
-            }
-            SettingSlider {
-                enabled: Settings.beatEffects
-                label: "Wave reach"
-                suffix: " px"
-                from: 400; to: 5000; step: 50
-                value: Settings.waveReach
-                onEdited: v => Settings.waveReach = v
-            }
-            SettingSlider {
-                enabled: Settings.beatEffects
-                label: "Wave duration"
-                suffix: " s"
-                decimals: 2
-                from: 0.2; to: 3.0; step: 0.05
-                value: Settings.waveDur
-                onEdited: v => Settings.waveDur = v
-            }
-            SectionHeader { text: "Kick colours" }
-            SettingToggle {
-                enabled: Settings.beatEffects
-                label: "Colour kicks by their sound"
-                hint: "Off: every kick is the cover colour. On: deep kicks lean one way, clicky ones the other"
-                checked: Settings.kickTimbre
-                onToggled: Settings.kickTimbre = !Settings.kickTimbre
-            }
-            SettingSlider {
-                enabled: Settings.beatEffects && Settings.kickTimbre
-                label: "Hue range"
-                suffix: "°"
-                from: 0; to: 120; step: 1
-                value: Settings.kickHue
-                onEdited: v => Settings.kickHue = v
-            }
-            SettingSlider {
-                enabled: Settings.beatEffects && Settings.kickTimbre
-                label: "Lightness range"
-                decimals: 2
-                from: 0; to: 0.3; step: 0.01
-                value: Settings.kickLight
-                onEdited: v => Settings.kickLight = v
-            }
-            SectionHeader { text: "Beat detection" }
-            BeatScope { visible: Settings.beatEffects }
-            Hint { text: "A kick is a bass rise that stands out from the last few seconds. Lower sensitivity and floor catch more (and more false) beats." }
-            SettingSlider {
-                enabled: Settings.beatEffects
-                label: "Sensitivity"
-                suffix: " sd"
-                decimals: 2
-                from: 0; to: 2.0; step: 0.05
-                value: Settings.beatSens
-                onEdited: v => Settings.beatSens = v
-            }
-            SettingSlider {
-                enabled: Settings.beatEffects
-                label: "Rise floor"
-                decimals: 3
-                from: 0; to: 0.08; step: 0.002
-                value: Settings.beatFloor
-                onEdited: v => Settings.beatFloor = v
-            }
-            SettingSlider {
-                enabled: Settings.beatEffects
-                label: "Min gap"
-                suffix: " s"
-                decimals: 2
-                from: 0.1; to: 0.6; step: 0.01
-                value: Settings.beatGap
-                onEdited: v => Settings.beatGap = v
-            }
-            SectionHeader { text: "Lyrics" }
-            SettingToggle {
-                label: "Show synced lyrics"
-                hint: "From lrclib.net, under the artist in the Now Playing panel"
-                checked: Settings.lyrics
-                onToggled: Settings.lyrics = !Settings.lyrics
-            }
-            SettingToggle {
-                enabled: Settings.lyrics
-                label: "Word-by-word"
-                hint: "Fill each word in as it's sung, when the lyrics have word timing"
-                checked: Settings.lyricsByWord
-                onToggled: Settings.lyricsByWord = !Settings.lyricsByWord
-            }
-            SettingToggle {
-                enabled: Settings.lyrics
-                label: "Use Musixmatch"
-                hint: "Word timing and more songs. Off: lrclib.net only, whole lines"
-                checked: Settings.lyricsMusixmatch
-                onToggled: Settings.lyricsMusixmatch = !Settings.lyricsMusixmatch
-            }
-            SettingSlider {
-                enabled: Settings.lyrics
-                label: "Offset"
-                suffix: " s"
-                decimals: 2
-                from: -1.5; to: 1.5; step: 0.05
-                value: Settings.lyricsOffset
-                onEdited: v => Settings.lyricsOffset = v
-            }
-            Hint { visible: Settings.lyrics; text: "Lyrics early? Slide left. Bluetooth headphones usually want about −0.3 s." }
-        }
-    }
-
-    Component {
-        id: panelsPage
-        ColumnLayout {
-            spacing: 12
-            SectionHeader { text: "Hover cards" }
-            Hint { text: "Now Playing, system stats and network pour out of their pill when the pointer rests on it." }
-            SettingSlider {
-                label: "Open after"
-                suffix: " ms"
-                from: 0; to: 1000; step: 20
-                value: Settings.hoverDelay
-                onEdited: v => Settings.hoverDelay = v
-            }
-            SettingSlider {
-                label: "Liquid speed"
-                suffix: "×"
-                decimals: 2
-                from: 0.5; to: 2.5; step: 0.05
-                value: Settings.liquidSpeed
-                onEdited: v => Settings.liquidSpeed = v
-            }
-            SectionHeader { text: "Tooltips" }
-            SettingSlider {
-                label: "Show after"
-                suffix: " ms"
-                from: 0; to: 1500; step: 50
-                value: Settings.tipDelay
-                onEdited: v => Settings.tipDelay = v
-            }
-            SectionHeader { text: "Quick settings" }
-            SettingToggle {
-                label: "Open from the screen edge"
-                hint: "Rest the pointer on the right edge, under the bar"
-                checked: Settings.quickEdge
-                onToggled: Settings.quickEdge = !Settings.quickEdge
-            }
-        }
-    }
-
-    Component {
-        id: alertsPage
-        ColumnLayout {
-            spacing: 12
-            SectionHeader { text: "Notifications" }
-            SettingToggle {
-                label: "Do not disturb"
-                hint: "Popups are held until it's turned off"
-                checked: Config.dnd
-                onToggled: Config.dnd = !Config.dnd
-            }
-            SettingToggle {
-                label: "Pause history"
-                checked: Config.historyPaused
-                onToggled: Config.historyPaused = !Config.historyPaused
-            }
-            SettingSlider {
-                label: "Default timeout"
-                suffix: " s"
-                decimals: 1
-                from: 1; to: 20; step: 0.5
-                value: Settings.notifTimeout / 1000
-                onEdited: v => Settings.notifTimeout = Math.round(v * 1000)
-            }
-            SettingSlider {
-                label: "History keeps"
-                from: 10; to: 500; step: 10
-                value: Settings.historyMax
-                onEdited: v => Settings.historyMax = v
-            }
-
-            SectionHeader { text: "On-screen display" }
-            SettingSlider {
-                label: "Stays up for"
-                suffix: " s"
-                decimals: 1
-                from: 0.5; to: 5; step: 0.1
-                value: Settings.osdTimeout / 1000
-                onEdited: v => Settings.osdTimeout = Math.round(v * 1000)
-            }
-            SettingSlider {
-                label: "Quiet at startup"
-                suffix: " s"
-                decimals: 1
-                from: 0; to: 5; step: 0.1
-                value: Settings.osdArmDelay / 1000
-                onEdited: v => Settings.osdArmDelay = Math.round(v * 1000)
-            }
-
-            SectionHeader { text: "Battery" }
-            SettingSlider {
-                label: "Warning below"
-                suffix: "%"
-                from: 5; to: 50; step: 1
-                value: Settings.batteryWarn
-                onEdited: v => Settings.batteryWarn = Math.max(v, Settings.batteryLow)
-            }
-            SettingSlider {
-                label: "Critical below"
-                suffix: "%"
-                from: 3; to: 30; step: 1
-                value: Settings.batteryLow
-                onEdited: v => Settings.batteryLow = Math.min(v, Settings.batteryWarn)
-            }
-            Hint { text: "Critical also sends one notification per discharge." }
-        }
-    }
-
-    // ---------- row components ----------
-
-    // a titled section divider (components/Section.qml is the bar's pill row, not this)
-    component SectionHeader: RowLayout {
-        id: sh
-        property string text: ""
-        Layout.fillWidth: true
-        Layout.topMargin: 6
-        spacing: 8
-        Text {
-            text: sh.text
-            color: Theme.actBg
-            font { family: Theme.font; pixelSize: 12; bold: true }
-        }
-        Rectangle {
-            Layout.fillWidth: true
-            implicitHeight: 1
-            color: Qt.alpha(Theme.mainFg, 0.18)
-        }
-    }
-
-    // The beat detector live (Visualizer's scope): the last 5 s of bass rise against the
-    // threshold it has to clear, with each beat it fired, rises it held back for the min gap,
-    // and the gap after each beat shaded. Repaints per cava frame, only while this page is up.
-    component BeatScope: ColumnLayout {
-        id: bs
-        Layout.fillWidth: true
-        spacing: 6
-        Component.onCompleted: Visualizer.scopeUsers++
-        Component.onDestruction: Visualizer.scopeUsers--
-        readonly property color riseCol: Theme.mainFg
-        readonly property color thrCol: "#e0af68"
-        readonly property color beatCol: Player.c1
-        readonly property color heldCol: "#f7768e"
-
-        Rectangle {
-            Layout.fillWidth: true
-            implicitHeight: 90
-            radius: 10
-            color: Qt.alpha(Theme.mainFg, 0.05)
-            border.color: Qt.alpha(Theme.mainFg, 0.1)
-            Text {
-                anchors.centerIn: parent
-                visible: !Visualizer.active
-                text: "Play something to see the detector work"
-                color: Theme.mainFg
-                opacity: 0.4
-                font { family: Theme.font; pixelSize: 11 }
-            }
-            Canvas {
-                id: scope
-                anchors { fill: parent; margins: 6 }
-                Connections { target: Visualizer; function onScoped() { scope.requestPaint() } }
-                onPaint: {
-                    const ctx = getContext("2d")
-                    ctx.reset()
-                    const R = Visualizer.scopeRise, T = Visualizer.scopeThr, H = Visualizer.scopeHit
-                    if (!R.length) return
-                    const n = 150, w = width / (n - 1), off = n - R.length
-                    const top = Math.max(0.05, ...R, ...T) * 1.1
-                    const X = i => (i + off) * w, Y = v => height - v / top * height
-                    // after each beat, the min gap: kicks in here are held back
-                    ctx.fillStyle = Qt.alpha(bs.riseCol, 0.07)
-                    const gw = Settings.beatGap * 30 * w
-                    for (let i = 0; i < H.length; i++) if (H[i] === 1) ctx.fillRect(X(i), 0, gw, height)
-                    // the rise, filled
-                    ctx.beginPath(); ctx.moveTo(X(0), height)
-                    for (let i = 0; i < R.length; i++) ctx.lineTo(X(i), Y(R[i]))
-                    ctx.lineTo(X(R.length - 1), height); ctx.closePath()
-                    ctx.fillStyle = Qt.alpha(bs.riseCol, 0.22); ctx.fill()
-                    ctx.beginPath()
-                    for (let i = 0; i < R.length; i++) ctx.lineTo(X(i), Y(R[i]))
-                    ctx.strokeStyle = Qt.alpha(bs.riseCol, 0.7); ctx.lineWidth = 1.2; ctx.stroke()
-                    // the threshold
-                    ctx.beginPath()
-                    for (let i = 0; i < T.length; i++) ctx.lineTo(X(i), Y(T[i]))
-                    ctx.strokeStyle = bs.thrCol; ctx.lineWidth = 1.5; ctx.stroke()
-                    // beats fired, and rises over the threshold held back by the gap
-                    for (let i = 0; i < H.length; i++) {
-                        if (!H[i]) continue
-                        ctx.fillStyle = H[i] === 1 ? bs.beatCol : bs.heldCol
-                        if (H[i] === 1) ctx.fillRect(X(i) - 1, 0, 2, height)
-                        else ctx.fillRect(X(i) - 2, Y(R[i]) - 2, 4, 4)
-                    }
-                }
-            }
-        }
-        // what the threshold is made of right now, and the tempo the beats imply
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: 12
-            Repeater {
-                model: [[bs.riseCol, "rise"], [bs.thrCol, "threshold"], [bs.beatCol, "beat"], [bs.heldCol, "held by gap"]]
-                Row {
-                    required property var modelData
-                    spacing: 5
-                    Rectangle { width: 8; height: 8; radius: 4; color: parent.modelData[0]; anchors.verticalCenter: parent.verticalCenter }
-                    Text { text: parent.modelData[1]; color: Theme.mainFg; opacity: 0.6; font { family: Theme.font; pixelSize: 10 } }
-                }
-            }
-            Item { Layout.fillWidth: true }
-            Text {
-                text: Visualizer.scopeBpm > 0 ? `≈ ${Math.round(Visualizer.scopeBpm)} BPM` : ""
-                color: Theme.actFg
-                font { family: Theme.font; pixelSize: 11; bold: true }
-            }
-        }
-        Text {
-            Layout.fillWidth: true
-            wrapMode: Text.WordWrap
-            color: Theme.mainFg
-            opacity: 0.55
-            font { family: Theme.font; pixelSize: 10 }
-            text: {
-                const m = Visualizer.scopeMean, sd = Visualizer.scopeSd
-                const f = v => v.toFixed(3)
-                return `threshold ${f(m + Settings.beatSens * sd + Settings.beatFloor)} = mean ${f(m)} + ${Settings.beatSens.toFixed(2)} × sd ${f(sd)} + floor ${f(Settings.beatFloor)}`
-            }
-        }
-    }
-
-    component Hint: Text {
-        Layout.fillWidth: true
-        wrapMode: Text.WordWrap
-        color: Theme.mainFg
-        opacity: 0.5
-        font { family: Theme.font; pixelSize: 11 }
-    }
-
-    // label (and an optional hint under it) with a switch on the right
-    component SettingToggle: RowLayout {
-        id: trow
-        property string label
-        property string hint: ""
-        property bool checked: false
-        signal toggled()
-        Layout.fillWidth: true
-        spacing: 10
-        ColumnLayout {
-            Layout.fillWidth: true
-            spacing: 2
-            Text {
-                Layout.fillWidth: true   // keeps the switch at the right edge when there's no hint
-                text: trow.label
-                color: Theme.mainFg
-                font { family: Theme.font; pixelSize: 12 }
-            }
-            Text {
-                visible: trow.hint !== ""
-                Layout.fillWidth: true
-                text: trow.hint
-                wrapMode: Text.WordWrap
-                color: Theme.mainFg
-                opacity: 0.5
-                font { family: Theme.font; pixelSize: 10 }
-            }
-        }
-        Toggle { checked: trow.checked; onToggled: trow.toggled() }
-    }
-
-    // numeric slider row: label, Slider, live readout. Reads `value`, maps it to the
-    // Slider's 0..1, writes back via edited(real).
-    component SettingSlider: RowLayout {
-        id: srow
-        property string label
-        property string suffix: ""
-        property real from: 0
-        property real to: 1
-        property real step: 0
-        property int decimals: 0
-        property real value: 0
-        signal edited(real v)
-
-        Layout.fillWidth: true
-        spacing: 10
-        opacity: enabled ? 1 : 0.4
-
-        Text {
-            Layout.preferredWidth: 120
-            text: srow.label
-            color: Theme.mainFg
-            font { family: Theme.font; pixelSize: 12 }
-            elide: Text.ElideRight
-        }
-        Slider {
-            Layout.fillWidth: true
-            value: srow.to > srow.from ? (srow.value - srow.from) / (srow.to - srow.from) : 0
-            onMoved: v => {
-                let raw = srow.from + v * (srow.to - srow.from)
-                if (srow.step > 0) raw = Math.round(raw / srow.step) * srow.step
-                srow.edited(raw)
-            }
-        }
-        Text {
-            Layout.preferredWidth: 60
-            horizontalAlignment: Text.AlignRight
-            text: srow.value.toFixed(srow.decimals) + srow.suffix
-            color: Theme.actFg
-            font { family: Theme.font; pixelSize: 12; bold: true }
-        }
-    }
-
-    // colour row: label, swatch, value field and a palette button. The value is "@name" (a
-    // HyDE colour variable, followed through theme switches) or a fixed "#hex": pick a swatch
-    // from the palette for the first, type a hex for the second.
-    component ColorRow: ColumnLayout {
-        id: crow
-        property string label
-        property string value: "#000000"
-        signal edited(string v)
-        property bool picking: false
-        property string hoverName: ""
-        readonly property bool isVar: field.text.startsWith("@")
-        // a variable only counts if HyDE actually defines it right now
-        readonly property bool valid: isVar ? Theme.has(field.text.slice(1))
-            : /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(field.text)
-        readonly property color resolved: Theme.color(field.text, "transparent")
-
-        Layout.fillWidth: true
-        spacing: 6
-
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: 10
-            Text {
-                Layout.preferredWidth: 120
-                text: crow.label
-                color: Theme.mainFg
-                font { family: Theme.font; pixelSize: 12 }
-                elide: Text.ElideRight
-            }
-            // what the value resolves to right now; a "?" when it resolves to nothing
-            Rectangle {
-                implicitWidth: 22; implicitHeight: 22
-                radius: 6
-                color: crow.valid ? crow.resolved : "transparent"
-                border.color: crow.valid ? Qt.alpha(Theme.mainFg, 0.4) : "#f7768e"
-                border.width: 1
-                TapHandler { onTapped: crow.picking = !crow.picking }
-                Text {
-                    anchors.centerIn: parent
-                    visible: !crow.valid
-                    text: "?"
-                    color: "#f7768e"
-                    font { family: Theme.font; pixelSize: 12; bold: true }
-                }
-            }
-            Rectangle {
-                Layout.fillWidth: true
-                implicitHeight: 26
-                radius: 7
-                color: Qt.alpha(Theme.mainFg, 0.08)
-                border.color: field.activeFocus ? Theme.actBg
-                    : crow.valid ? Qt.alpha(Theme.mainFg, 0.25) : "#f7768e"
-                border.width: 1
-                Behavior on border.color { ColorAnimation { duration: 120 } }
-                TextInput {
-                    id: field
-                    anchors { fill: parent; leftMargin: 8; rightMargin: badge.width + 12 }
-                    verticalAlignment: TextInput.AlignVCenter
-                    text: crow.value
-                    color: Theme.mainFg
-                    font { family: Theme.font; pixelSize: 12 }
-                    selectByMouse: true
-                    clip: true
-                    onTextEdited: if (crow.valid) crow.edited(text)
-                    // follow the model (reset / external change / palette pick) while not being edited
-                    Connections {
-                        target: crow
-                        function onValueChanged() { if (!field.activeFocus) field.text = crow.value }
-                    }
-                }
-                // which kind it is: following HyDE, or fixed
-                Rectangle {
-                    id: badge
-                    anchors { right: parent.right; rightMargin: 4; verticalCenter: parent.verticalCenter }
-                    implicitWidth: badgeText.implicitWidth + 10
-                    implicitHeight: 18
-                    radius: 9
-                    readonly property bool hyde: crow.isVar
-                    readonly property bool missing: hyde && !crow.valid
-                    color: missing ? Qt.alpha("#f7768e", 0.2) : hyde ? Qt.alpha(Theme.actBg, 0.25) : Qt.alpha(Theme.mainFg, 0.12)
-                    Text {
-                        id: badgeText
-                        anchors.centerIn: parent
-                        // a followed variable shows what it is right now
-                        text: badge.missing ? "not in HyDE" : badge.hyde ? "HyDE " + Qt.color(crow.resolved).toString() : "custom"
-                        color: badge.missing ? "#f7768e" : badge.hyde ? Theme.actBg : Theme.mainFg
-                        opacity: badge.hyde ? 1 : 0.6
-                        font { family: Theme.font; pixelSize: 9; bold: true }
-                    }
-                }
-            }
-            Rectangle {
-                implicitWidth: 26; implicitHeight: 26
-                radius: 7
-                color: crow.picking ? Qt.alpha(Theme.actBg, 0.3) : palHover.hovered ? Qt.alpha(Theme.mainFg, 0.15) : Qt.alpha(Theme.mainFg, 0.08)
-                Behavior on color { ColorAnimation { duration: 120 } }
-                HoverHandler { id: palHover; cursorShape: Qt.PointingHandCursor }
-                TapHandler { onTapped: crow.picking = !crow.picking }
-                Text {
-                    anchors.centerIn: parent
-                    text: Theme.g(0xF03D8)   // palette
-                    color: crow.picking ? Theme.actFg : Theme.mainFg
-                    font { family: Theme.font; pixelSize: 14 }
-                }
-            }
-        }
-
-        // the palette: HyDE's bar colours and the four wallbash groups (primary, text, nine accents)
-        Loader {
-            active: crow.picking
-            visible: active
-            Layout.fillWidth: true
-            Layout.leftMargin: 130
-            sourceComponent: Rectangle {
-                implicitHeight: pal.implicitHeight + 16
-                radius: 9
-                color: Qt.alpha(Theme.mainFg, 0.05)
-                border.color: Qt.alpha(Theme.mainFg, 0.12)
-                border.width: 1
+            // ---- the page ----
+            Flickable {
+                id: flick
+                anchors { top: head.bottom; left: parent.left; right: parent.right; bottom: foot.top; leftMargin: 20; rightMargin: 20 }
+                contentHeight: pageCol.implicitHeight + 8
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
                 Column {
-                    id: pal
-                    x: 8; y: 8
-                    width: parent.width - 16
-                    spacing: 5
-                    Text { text: "Bar theme"; color: Theme.mainFg; opacity: 0.5; font { family: Theme.font; pixelSize: 10 } }
-                    Row { spacing: 4; Repeater { model: Theme.themeVars; Swatch { required property string modelData; row: crow; name: modelData } } }
-                    Text { topPadding: 2; text: "Wallbash"; color: Theme.mainFg; opacity: 0.5; font { family: Theme.font; pixelSize: 10 } }
-                    Repeater {
-                        model: Theme.paletteVars
-                        Row {
-                            required property var modelData
-                            spacing: 4
-                            Repeater { model: modelData; Swatch { required property string modelData; row: crow; name: modelData } }
-                        }
+                    id: pageCol
+                    width: flick.width
+                    spacing: 6
+                    // a new page settles in from slightly below
+                    property real dy: 0
+                    transform: Translate { y: pageCol.dy }
+                    Connections {
+                        target: root
+                        function onPageChanged() { flick.contentY = 0; settle.restart() }
                     }
-                    RowLayout {
-                        width: parent.width
-                        Text {
-                            Layout.fillWidth: true
-                            text: crow.hoverName ? "@" + crow.hoverName : (field.text.startsWith("@") ? "following " + field.text : "custom colour")
-                            color: Theme.mainFg
-                            opacity: 0.7
-                            elide: Text.ElideRight
-                            font { family: Theme.font; pixelSize: 10 }
+                    ParallelAnimation {
+                        id: settle
+                        NumberAnimation { target: pageCol; property: "opacity"; from: 0; to: 1; duration: Look.ms("effects"); easing.type: Easing.BezierSpline; easing.bezierCurve: Look.curves.effects }
+                        Anim { target: pageCol; property: "dy"; from: 10; to: 0 }
+                    }
+
+                    // Bar
+                    Group {
+                        page: 0
+                        Head { text: "Clock and calendar" }
+                        Toggle { title: "24-hour time"; on: Settings.clock24h; onFlip: Settings.clock24h = !Settings.clock24h }
+                        Pick {
+                            title: "Week starts on"
+                            options: ["Locale", "Monday", "Sunday"]
+                            current: Settings.weekStart
+                            onPicked: i => Settings.weekStart = i
                         }
-                        // turn a followed colour into a fixed one, starting from what it is now
-                        PillButton {
-                            visible: field.text.startsWith("@")
-                            text: "Make custom"
-                            onClicked: crow.edited(Qt.color(Theme.color(crow.value, "#000000")).toString())
-                        }
+                        Num { title: "Calendar refresh"; sub: "Opening the calendar always fetches"; from: 1; to: 60; step: 1; unit: " min"; value: Settings.calRefresh; onEdit: v => Settings.calRefresh = v }
+                        Num { title: "Join turns solid"; sub: "Minutes before a meeting starts"; from: 0; to: 30; step: 1; unit: " min"; value: Settings.meetLead; onEdit: v => Settings.meetLead = v }
+                        Head { text: "Hover" }
+                        Num { title: "Hover delay"; sub: "How long the pointer rests before a panel drops"; from: 0; to: 600; step: 10; unit: " ms"; value: Settings.hoverDelay; onEdit: v => Settings.hoverDelay = v }
+                    }
+                    // System
+                    Group {
+                        page: 1
+                        Head { text: "Usage" }
+                        Num { title: "Sample every"; from: 1; to: 10; step: 0.5; unit: " s"; value: Settings.sysInterval / 1000; onEdit: v => Settings.sysInterval = Math.round(v * 1000) }
+                        Colour { title: "CPU"; value: Settings.sysColCpu; onEdit: v => Settings.sysColCpu = v }
+                        Colour { title: "Memory"; value: Settings.sysColRam; onEdit: v => Settings.sysColRam = v }
+                        Head { text: "Network" }
+                        Num { title: "Sample every"; from: 1; to: 10; step: 0.5; unit: " s"; value: Settings.netInterval / 1000; onEdit: v => Settings.netInterval = Math.round(v * 1000) }
+                        Colour { title: "Download"; value: Settings.netColDown; onEdit: v => Settings.netColDown = v }
+                        Colour { title: "Upload"; value: Settings.netColUp; onEdit: v => Settings.netColUp = v }
+                    }
+                    // Media
+                    Group {
+                        page: 2
+                        Head { text: "Lyrics" }
+                        Toggle { title: "Synced lyrics"; sub: "From lrclib.net, in the music panel"; on: Settings.lyrics; onFlip: Settings.lyrics = !Settings.lyrics }
+                        Toggle { title: "Ask Musixmatch too"; sub: "Word timing where lrclib only has lines"; on: Settings.lyricsMusixmatch; onFlip: Settings.lyricsMusixmatch = !Settings.lyricsMusixmatch }
+                        Num { title: "Offset"; sub: "Positive shows lines earlier"; from: -1.5; to: 1.5; step: 0.05; unit: " s"; value: Settings.lyricsOffset; onEdit: v => Settings.lyricsOffset = v }
+                        Toggle { title: "Lyrics in the bar"; sub: "The line being sung replaces the title while it's sung"; on: Settings.lyricsInBar; onFlip: Settings.lyricsInBar = !Settings.lyricsInBar }
+                        Head { text: "Beat glow" }
+                        Toggle { title: "Beat effects"; sub: "The wave on the window border"; on: Settings.beatEffects; onFlip: Settings.beatEffects = !Settings.beatEffects }
+                        Num { title: "Wave reach"; from: 400; to: 5000; step: 50; unit: " px"; value: Settings.waveReach; onEdit: v => Settings.waveReach = v }
+                        Num { title: "Wave length"; from: 0.2; to: 3; step: 0.05; unit: " s"; value: Settings.waveDur; onEdit: v => Settings.waveDur = v }
+                        Toggle { title: "Colour by sound"; sub: "Off: every kick is the cover colour"; on: Settings.kickTimbre; onFlip: Settings.kickTimbre = !Settings.kickTimbre }
+                        Num { title: "Hue shift"; from: 0; to: 120; step: 1; unit: "°"; value: Settings.kickHue; onEdit: v => Settings.kickHue = v }
+                        Num { title: "Lightness shift"; from: 0; to: 0.3; step: 0.01; value: Settings.kickLight; onEdit: v => Settings.kickLight = v }
+                        Head { text: "Kick detection" }
+                        Num { title: "Floor"; sub: "Higher catches fewer kicks"; from: 1; to: 12; step: 0.5; unit: " dB"; value: Settings.kickFloor; onEdit: v => Settings.kickFloor = v }
+                        Num { title: "Gap between kicks"; from: 0.1; to: 0.6; step: 0.01; unit: " s"; value: Settings.kickGap; onEdit: v => Settings.kickGap = v }
+                        Num { title: "Loudness margin"; sub: "Lower: fewer false kicks, quiet ones missed"; from: 2; to: 14; step: 0.5; unit: " dB"; value: Settings.kickMargin; onEdit: v => Settings.kickMargin = v }
+                        Num { title: "Sync"; sub: "Positive shows kicks earlier"; from: -0.3; to: 0.3; step: 0.01; unit: " s"; value: Settings.kickOffset; onEdit: v => Settings.kickOffset = v }
+                    }
+                    // Alerts
+                    Group {
+                        page: 3
+                        Head { text: "Notifications" }
+                        Toggle { title: "Drop from the bell"; sub: "Every notification comes out of the bar; off, they pop up at the side"; on: Settings.notifDrop; onFlip: Settings.notifDrop = !Settings.notifDrop }
+                        Num { title: "Popups stay"; sub: "When the app leaves it to the server"; from: 1; to: 20; step: 0.5; unit: " s"; value: Settings.notifTimeout / 1000; onEdit: v => Settings.notifTimeout = Math.round(v * 1000) }
+                        Num { title: "History keeps"; from: 10; to: 500; step: 10; value: Settings.historyMax; onEdit: v => Settings.historyMax = v }
+                        Head { text: "Volume and brightness level" }
+                        Num { title: "Stays up"; from: 0.5; to: 5; step: 0.1; unit: " s"; value: Settings.osdTimeout / 1000; onEdit: v => Settings.osdTimeout = Math.round(v * 1000) }
+                        Num { title: "Quiet at start-up"; from: 0; to: 5; step: 0.1; unit: " s"; value: Settings.osdArmDelay / 1000; onEdit: v => Settings.osdArmDelay = Math.round(v * 1000) }
+                        Head { text: "Battery" }
+                        Num { title: "Amber below"; from: 5; to: 50; step: 1; unit: "%"; value: Settings.batteryWarn; onEdit: v => Settings.batteryWarn = Math.max(v, Settings.batteryLow) }
+                        Num { title: "Red and a notification below"; from: 3; to: 30; step: 1; unit: "%"; value: Settings.batteryLow; onEdit: v => Settings.batteryLow = Math.min(v, Settings.batteryWarn) }
+                    }
+                    // Colours
+                    Group {
+                        page: 4
+                        T { width: parent.width; wrapMode: Text.Wrap; color: Look.dim; font.pixelSize: Look.small; text: "For notifications, the volume popup and the power menu. The bar follows the wallpaper. \"@name\" follows a HyDE colour, \"#hex\" stays fixed." }
+                        Colour { title: "Background"; value: Settings.themeMainBg; onEdit: v => Settings.themeMainBg = v }
+                        Colour { title: "Text"; value: Settings.themeMainFg; onEdit: v => Settings.themeMainFg = v }
+                        Colour { title: "Active"; value: Settings.themeActBg; onEdit: v => Settings.themeActBg = v }
+                        Colour { title: "Active text"; value: Settings.themeActFg; onEdit: v => Settings.themeActFg = v }
+                        Colour { title: "Hover"; value: Settings.themeHvrBg; onEdit: v => Settings.themeHvrBg = v }
+                        Colour { title: "Hover text"; value: Settings.themeHvrFg; onEdit: v => Settings.themeHvrFg = v }
+                    }
+                }
+            }
+
+            // ---- footer: reset, which asks for a second click ----
+            Item {
+                id: foot
+                anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                height: 52
+                Rectangle { width: parent.width; height: 1; color: Look.line }
+                property bool armed: false
+                Timer { id: disarm; interval: 3000; onTriggered: foot.armed = false }
+                Btn {
+                    anchors { right: parent.right; rightMargin: 16; verticalCenter: parent.verticalCenter }
+                    text: foot.armed ? "Click again to reset everything" : "Reset all"
+                    strong: foot.armed
+                    tone: Look.alert
+                    onClicked: {
+                        if (foot.armed) { Settings.reset(); foot.armed = false }
+                        else { foot.armed = true; disarm.restart() }
                     }
                 }
             }
         }
     }
 
-    // one palette colour; picks "@name" for its row
-    component Swatch: Rectangle {
-        property var row
-        property string name
-        readonly property bool current: row.value === "@" + name
-        width: 18; height: 18
-        radius: 5
-        visible: Theme.has(name)   // a theme without it leaves no empty slot
-        color: Theme.color("@" + name, "transparent")
-        border.color: current ? Theme.actFg : Qt.alpha(Theme.mainFg, 0.25)
-        border.width: current ? 2 : 1
-        scale: sh.hovered ? 1.15 : 1
-        Behavior on scale { NumberAnimation { duration: 100 } }
-        HoverHandler {
-            id: sh
-            cursorShape: Qt.PointingHandCursor
-            onHoveredChanged: if (hovered) row.hoverName = name; else if (row.hoverName === name) row.hoverName = ""
+    // one page's rows
+    component Group: Column {
+        property int page
+        visible: root.page === page
+        width: parent.width
+        spacing: 6
+    }
+    // a row: title and an optional line under it on the left, a control on the right
+    component Line: Item {
+        id: r
+        property string title
+        property string sub: ""
+        default property alias control: ctl.data
+        width: parent.width
+        implicitHeight: sub ? 42 : 34
+        Column {
+            anchors { left: parent.left; right: ctl.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
+            T { width: parent.width; text: r.title; elide: Text.ElideRight }
+            T { visible: r.sub !== ""; width: parent.width; text: r.sub; color: Look.dim; font.pixelSize: Look.small; elide: Text.ElideRight }
         }
-        TapHandler { onTapped: row.edited("@" + name) }
+        Item {
+            id: ctl
+            anchors { right: parent.right; verticalCenter: parent.verticalCenter }
+            width: childrenRect.width
+            height: 30
+        }
+    }
+    component Toggle: Line {
+        id: tg
+        property bool on
+        signal flip()
+        Switch { on: tg.on; onToggled: tg.flip() }
+    }
+    component Num: Line {
+        id: n
+        property real from
+        property real to
+        property real step: 1
+        property string unit: ""
+        property real value
+        signal edit(real v)
+        readonly property int places: step < 0.01 ? 3 : step < 0.1 ? 2 : step < 1 ? 1 : 0
+        Row {
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 10
+            Slide {
+                width: 170
+                value: (n.value - n.from) / (n.to - n.from)
+                onMoved: v => n.edit(Math.round((n.from + v * (n.to - n.from)) / n.step) * n.step)
+            }
+            T { width: 62; anchors.verticalCenter: parent.verticalCenter; horizontalAlignment: Text.AlignRight; text: n.value.toFixed(n.places) + n.unit; color: Look.dim }
+        }
+    }
+    component Pick: Line {
+        id: pk
+        property var options: []
+        property int current
+        signal picked(int i)
+        Row {
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 4
+            Repeater {
+                model: pk.options
+                Btn {
+                    required property string modelData
+                    required property int index
+                    text: modelData
+                    strong: pk.current === index
+                    onClicked: pk.picked(index)
+                }
+            }
+        }
+    }
+    // "#hex" or "@hyde-name": the swatch shows what it resolves to, a red ring when it doesn't
+    component Colour: Line {
+        id: c
+        property string value
+        signal edit(string v)
+        readonly property bool valid: field.text.startsWith("@") ? Theme.has(field.text.slice(1))
+            : /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(field.text)
+        onValueChanged: if (field.text !== value) field.text = value
+        Row {
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 10
+            Rectangle {
+                anchors.verticalCenter: parent.verticalCenter
+                width: 22
+                height: 22
+                radius: 11
+                color: c.valid ? Theme.color(field.text, "transparent") : "transparent"
+                border.width: 1
+                border.color: c.valid ? Look.line : Look.alert
+            }
+            Field {
+                id: field
+                width: 170
+                text: c.value
+                onTextChanged: if (c.valid && text !== c.value) c.edit(text)
+            }
+        }
     }
 }

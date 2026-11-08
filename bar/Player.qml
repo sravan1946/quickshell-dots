@@ -49,8 +49,9 @@ Singleton {
     property real syncPos: -1      // s, the player's own answer; -1 until the first one
     property double syncAt: 0      // epoch s it arrived
     property int tick: 0
+    property bool fine: false      // set by Lyrics while the bar shows the line being sung
     readonly property real pos: {
-        if (open) Visualizer.t   // the panel's seek bar and lyrics: every frame
+        if (open || fine) Visualizer.t   // the panel's seek bar and lyrics, the bar's lyric line: every frame
         tick                     // otherwise each second, plenty for the pill's progress line
         if (!player?.positionSupported) return 0
         const p = syncPos < 0 ? player.position : syncPos + (playing ? Date.now() / 1000 - syncAt : 0)
@@ -65,24 +66,33 @@ Singleton {
     }
     onPlayingChanged: { if (playing) idle = false; refreshPos() }
     onPlayerChanged: { idle = false; syncPos = -1; refreshPos() }
-    Timer { interval: 1000; repeat: true; running: pl.playing && !(pl.open && Visualizer.active); onTriggered: pl.tick++ }
+    Timer { interval: 1000; repeat: true; running: pl.playing && !((pl.open || pl.fine) && Visualizer.active); onTriggered: pl.tick++ }
     Timer { id: syncSoon; interval: 150; onTriggered: pl.sync() }
     // the panel's seek bar and lyrics want it tight; the pill's progress line doesn't
-    Timer { interval: pl.open ? 2000 : 10000; repeat: true; running: pl.playing; onTriggered: pl.sync() }
+    Timer { interval: pl.open || pl.fine ? 2000 : 10000; repeat: true; running: pl.playing; onTriggered: pl.sync() }
     function sync() {
         if (!player?.positionSupported || posQuery.running) return
         posQuery.command = ["gdbus", "call", "--session", "--dest", player.dbusName, "--object-path", "/org/mpris/MediaPlayer2",
                             "--method", "org.freedesktop.DBus.Properties.Get", "org.mpris.MediaPlayer2.Player", "Position"]
+        posQuery.sent = Date.now() / 1000
         posQuery.running = true
     }
     Process {
         id: posQuery
+        property double sent: 0
         stdout: StdioCollector {
             onStreamFinished: {
                 const m = text.match(/(-?\d+)>/)   // "(<int64 164193007>,)", µs
                 if (!m) return
-                pl.syncPos = +m[1] / 1e6
-                pl.syncAt = Date.now() / 1000
+                // the answer is from somewhere between asking and hearing back, not from now
+                const at = (posQuery.sent + Date.now() / 1000) / 2
+                const n = +m[1] / 1e6
+                // and a hair behind our own clock is that delay, not a seek: going back for it
+                // made lyrics flick off and on at a line's edge
+                const ours = pl.syncPos < 0 ? -1 : pl.syncPos + (pl.playing ? at - pl.syncAt : 0)
+                if (ours >= 0 && n < ours && ours - n < 0.15) return
+                pl.syncPos = n
+                pl.syncAt = at
             }
         }
     }
@@ -135,11 +145,14 @@ Singleton {
     // the previous downloads are removed first.
     readonly property string cache: Quickshell.env("HOME") + "/.cache"
     property string artFile: ""
+    // the artUrl artFile is for (or failed for): a new track's cover is still coming while they differ
+    property string artFor: ""
+    readonly property bool artPending: artUrl !== artFor
     onArtUrlChanged: fetchArt()
     Component.onCompleted: fetchArt()
     function fetchArt() {
-        if (!artUrl) { artFile = ""; themed(); return }
-        if (artUrl.startsWith("file://")) { artFile = artUrl; return }
+        if (!artUrl) { artFile = ""; artFor = ""; themed(); return }
+        if (artUrl.startsWith("file://")) { artFile = artUrl; artFor = artUrl; return }
         if (fetch.running) return   // onExited picks up the newer URL
         fetch.url = artUrl
         fetch.target = `${cache}/quickshell-np-art-${Date.now()}`
@@ -152,9 +165,10 @@ Singleton {
         property string url
         property string target
         onExited: code => {
-            if (fetch.url !== pl.artUrl) pl.fetchArt()
-            else if (code === 0) pl.artFile = "file://" + fetch.target
+            if (fetch.url !== pl.artUrl) return pl.fetchArt()
+            if (code === 0) pl.artFile = "file://" + fetch.target
             else pl.themed()
+            pl.artFor = fetch.url
         }
     }
 

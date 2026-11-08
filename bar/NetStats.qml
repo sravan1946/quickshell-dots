@@ -17,6 +17,7 @@ Singleton {
     property real down: 0
     property real up: 0
     property string gateway: ""
+    property bool vpn: false         // a tunnel is up (tun/wg/tap/ppp: pritunl's tun0, WireGuard)
     property var info: ({})
     property var hist: []            // last 60 [down, up] samples (2 min), for the graphs
 
@@ -34,6 +35,7 @@ Singleton {
         }
         // /proc/net/route stores the gateway as little-endian hex
         gateway = gw ? [0, 2, 4, 6].map(i => parseInt(gw.substr(6 - i, 2), 16)).join(".") : ""
+        vpn = /^\s*(tun|wg|tap|ppp)\d*:/m.test(devFile.text())
         const line = devFile.text().split("\n").find(l => l.trim().startsWith(best + ":"))
         if (best === "" || !line) { iface = ""; last = 0; return }
         const f = line.split(":")[1].trim().split(/\s+/)

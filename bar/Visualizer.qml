@@ -3,13 +3,14 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import Quickshell.Services.Mpris
+import Quickshell.Services.Pipewire
 import qs
 
 // cava's spectrum of whatever is playing (scripts/cava.conf): 32 bands, stereo layout
 // (left treble .. bass | bass .. right treble), handed out already packed as the vec4
 // uniforms the shaders take: l0..l7 (this frame) and p0..p7 (peaks, falling slowly).
 // Peaks are only pushed while something wants them (peakUsers, the panel's ring).
-// `beat` fires on each kick: see the onset detector below.
+// `beat` fires on each kick (scripts/kicks.py), when it's heard: see `hold` below.
 // cava runs only while an MPRIS player is playing.
 Singleton {
     id: viz
@@ -18,19 +19,6 @@ Singleton {
     property bool active: false   // frames are arriving
     property real bass: 0         // 0..1, the four middle (lowest) bands
     property int peakUsers: 0
-    // The detector's working, for the live scope on Settings' Media page: the last 5 s of
-    // frames (rise, the threshold it had to clear, and 1 beat / 2 over it but held back by the
-    // min gap / 0 neither), the threshold's parts now, and the tempo the beats imply. Only
-    // recorded while scopeUsers > 0; `scoped` fires per recorded frame.
-    property int scopeUsers: 0
-    property var scopeRise: []
-    property var scopeThr: []
-    property var scopeHit: []
-    property var scopeBeats: []   // `t`s of the beats in the last 8 s
-    property real scopeMean: 0
-    property real scopeSd: 0
-    property real scopeBpm: 0
-    signal scoped()
     property double beatAt: -10   // `t` of the latest beat
     property real beatStrength: 0 // 0..1, how hard it hit relative to recent kicks
     // the last four beats, newest in x: their `t`s and strengths (for overlapping effects)
@@ -78,13 +66,19 @@ Singleton {
     property var lv: new Array(32).fill(0)
     property var pk: new Array(32).fill(0)
     property var pv1: new Array(32).fill(0)   // last frame's levels
-    property var pv2: new Array(32).fill(0)   // the frame before (the detector's rise runs over two)
-    // onset detector state
-    property real prevBass: 0    // last frame's
-    property real prevBass2: 0   // the frame before
-    property real riseMean: 0
-    property real riseVar: 0
-    property real riseMax: 0.05
+    property var pv2: new Array(32).fill(0)   // the frame before (timbre()'s rise runs over two)
+    // kicks heard from kicks.py, waiting for their sound to come out of the speakers:
+    // {at: t to fire, det: t found, s: strength, c: colour once cava has caught up with it}
+    property var pending: []
+    property int queued: 0       // pending.length, for bindings
+    // The sink plays what kicks.py hears `lag` s later (PipeWire's own figure: 0.31 s on the
+    // Bluetooth headphones, next to nothing on the speakers), so each kick waits `hold` s to land
+    // with its sound. Measured 2026-10-27 (sink audio, logged kicks and 60 fps grabs of the bar):
+    // found ~0.01 s after the sink has it, on screen ~0.05 s after it fires; held for lag - 0.07
+    // the light leaves the music as it's heard (within ~0.02 s, by the song) and reaches the
+    // bar's ends ~0.1 s later as it travels. Settings.kickOffset: + shows earlier.
+    property real lag: 0
+    readonly property real hold: Math.max(0, lag - 0.07 - Settings.kickOffset)
 
     function clear() {
         lv.fill(0); pk.fill(0)
@@ -97,47 +91,41 @@ Singleton {
         beatAts = Qt.vector4d(-10, -10, -10, -10)
         beatPows = zero
         beatR = beatG = beatB = zero
-        prevBass = prevBass2 = 0
+        pending = []
+        queued = 0
     }
 
-    // Kick onsets from how fast the low bands rise, not how loud they are: in busy
-    // sections the bass sits high and only dips between kicks, in sparse ones it swells
-    // slowly, and a level threshold misfires on both. The rise is taken over two frames,
-    // since cava's smoothing spreads a kick across them. It beats when it clears the recent
-    // mean + beatSens sd (~9 s EMA) plus beatFloor, at most every beatGap s (Settings).
-    // Strength is the rise against the biggest recent one.
-    // Defaults tuned by scripts/kicktune.py against kicks heard in the raw audio (30 fps cava, noise_reduction 77).
-    function detect(b) {
-        const d = Math.max(0, b - prevBass2)
-        prevBass2 = prevBass
-        prevBass = b
-        const sd = Math.sqrt(riseVar)
-        const thr = riseMean + Settings.beatSens * sd + Settings.beatFloor
-        const over = d > thr, open = t - beatAt >= Settings.beatGap
-        if (scopeUsers > 0) record(d, thr, sd, over ? (open && Settings.beatEffects ? 1 : 2) : 0)
-        if (over && open) {
-            riseMax = Math.max(riseMax, d)
-            const s = Math.min(1, d / riseMax)
-            if (Settings.beatEffects) {
-                beatAt = t
-                beatStrength = s
-                beatAts = Qt.vector4d(t, beatAts.x, beatAts.y, beatAts.z)
-                beatPows = Qt.vector4d(s, beatPows.x, beatPows.y, beatPows.z)
-                const k = kickColor(timbre())
-                beatCol = k
-                beatR = Qt.vector4d(k.r, beatR.x, beatR.y, beatR.z)
-                beatG = Qt.vector4d(k.g, beatG.x, beatG.y, beatG.z)
-                beatB = Qt.vector4d(k.b, beatB.x, beatB.y, beatB.z)
-                beat(s)
-            }
+    // a kick found (strength s) that started `age` s ago (kicks.py watches each rise for its
+    // peak first): it lands `hold` s after it started, coloured once cava has it
+    function kick(s, age) {
+        const now = Date.now() / 1000 - epoch - age
+        pending.push({ at: now + hold, det: now, s: s, c: null })
+        queued = pending.length
+    }
+    // cava sees a kick ~0.07 s after kicks.py does: colour the ones it has caught up with
+    function colour() {
+        for (const k of pending) if (!k.c && t >= k.det + 0.07) k.c = kickColor(timbre())
+    }
+    function release() {
+        while (pending.length && pending[0].at <= t) {
+            const k = pending.shift()
+            queued = pending.length
+            if (t - k.at > 0.1) continue   // held up (no frames yet): its moment has passed
+            const c = k.c ?? kickColor(timbre())
+            beatAt = k.at
+            beatStrength = k.s
+            beatAts = Qt.vector4d(k.at, beatAts.x, beatAts.y, beatAts.z)
+            beatPows = Qt.vector4d(k.s, beatPows.x, beatPows.y, beatPows.z)
+            beatCol = c
+            beatR = Qt.vector4d(c.r, beatR.x, beatR.y, beatR.z)
+            beatG = Qt.vector4d(c.g, beatG.x, beatG.y, beatG.z)
+            beatB = Qt.vector4d(c.b, beatB.x, beatB.y, beatB.z)
+            beat(k.s)
         }
-        riseMax = Math.max(0.05, riseMax * 0.997)
-        riseMean += (d - riseMean) / 270
-        riseVar += ((d - riseMean) * (d - riseMean) - riseVar) / 270
     }
 
     // What a kick sounded like, 0 (all sub) .. 1 (all treble): where in the spectrum its
-    // sudden energy landed, the centroid of each band's rise over the detector's two frames,
+    // sudden energy landed, the centroid of each band's rise over two frames,
     // L and R folded together. Measured on real kicks (cava, monstercat on): a typical
     // kick drum lands 0.12-0.17, clicky or snare-ish hits up to ~0.55.
     function timbre() {
@@ -160,22 +148,9 @@ Singleton {
         return Qt.hsla((Math.max(0, b.hslHue) + Settings.kickHue / 360 * x + 1) % 1, b.hslSaturation, l, 1)
     }
 
-    function record(d, thr, sd, hit) {
-        const push = (a, v) => { a.push(v); if (a.length > 150) a.shift() }   // 5 s at 30 fps
-        push(scopeRise, d); push(scopeThr, thr); push(scopeHit, hit)
-        scopeMean = riseMean
-        scopeSd = sd
-        if (hit === 1) scopeBeats.push(t)
-        while (scopeBeats.length && t - scopeBeats[0] > 8) scopeBeats.shift()
-        // tempo: the median gap between recent beats, folded into 70..180 BPM
-        const gaps = scopeBeats.slice(1).map((b, i) => b - scopeBeats[i]).sort((a, b) => a - b)
-        let bpm = gaps.length >= 3 ? 60 / gaps[gaps.length >> 1] : 0
-        while (bpm > 0 && bpm < 70) bpm *= 2
-        while (bpm > 180) bpm /= 2
-        scopeBpm = bpm
-        scoped()
-    }
-
+    // band i (0..31) for a binding: `lv` changes in place, which no binding sees; l0..l7 are
+    // reassigned every frame
+    function level(i) { const v = [l0, l1, l2, l3, l4, l5, l6, l7][i >> 2]; return [v.x, v.y, v.z, v.w][i & 3] }
     function publish() {
         const V = (a, k) => Qt.vector4d(a[k], a[k + 1], a[k + 2], a[k + 3])
         l0 = V(lv, 0); l1 = V(lv, 4); l2 = V(lv, 8); l3 = V(lv, 12)
@@ -200,6 +175,40 @@ Singleton {
     }
 
     Process {
+        id: kp
+        readonly property bool want: viz.playing && Settings.beatEffects
+        onWantChanged: running = want
+        Component.onCompleted: running = want
+        // a new command only applies to the next start: restart for a moved setting
+        onCommandChanged: if (running) { running = false; Qt.callLater(() => running = want) }
+        command: ["python3", Qt.resolvedUrl("scripts/kicks.py").toString().replace("file://", ""),
+                  String(Settings.kickFloor), String(Settings.kickGap), String(Settings.kickMargin)]
+        onRunningChanged: if (running) lagQ.ask()
+        stdout: SplitParser {
+            onRead: line => { const [s, age] = line.split(" ").map(Number); viz.kick(Math.min(1, s || 0), age || 0) }
+        }
+    }
+    // the default sink's latency (its Latency param's minNs), asked when kicks start or it changes
+    readonly property var sink: Pipewire.defaultAudioSink
+    onSinkChanged: lagQ.ask()
+    Process {
+        id: lagQ
+        function ask() { if (viz.sink) { command = ["pw-cli", "enum-params", String(viz.sink.id), "Latency"]; running = true } }
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const ns = (text.match(/minNs[^\n]*\n\s*Long \d+/g) ?? []).map(m => Number(m.split("Long ")[1]))
+                viz.lag = ns.length ? Math.max(...ns) / 1e9 : 0
+            }
+        }
+    }
+    // cava's frames come 30 times a second; while a wave is out (or a kick waits) the clock
+    // runs with the screen instead, so the light moves every frame
+    FrameAnimation {
+        running: viz.active && (viz.queued > 0 || viz.t - viz.beatAt < viz.waveDur)
+        onTriggered: { viz.t = Date.now() / 1000 - viz.epoch; viz.release() }
+    }
+
+    Process {
         running: viz.playing
         command: ["cava", "-p", Qt.resolvedUrl("scripts/cava.conf").toString().replace("file://", "")]
         onRunningChanged: if (!running) fall.start()
@@ -218,7 +227,8 @@ Singleton {
                 viz.active = true
 
                 viz.bass = (lv[14] + lv[15] + lv[16] + lv[17]) / 4
-                viz.detect((lv[13] + lv[14] + lv[15] + lv[16] + lv[17] + lv[18]) / 6)
+                viz.colour()
+                viz.release()
                 const old = viz.pv2   // recycle: pv2 <- pv1 <- this frame
                 viz.pv2 = viz.pv1
                 for (let k = 0; k < 32; k++) old[k] = lv[k]

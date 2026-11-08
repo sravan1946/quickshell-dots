@@ -26,14 +26,14 @@ Singleton {
     readonly property var paletteVars: [1, 2, 3, 4].map(n =>
         [`wallbash_pry${n}`, `wallbash_txt${n}`].concat([1, 2, 3, 4, 5, 6, 7, 8, 9].map(i => `wallbash_${n}xa${i}`)))
 
-    property color barBg: color(Settings.themeBarBg, Qt.rgba(0, 0, 0, 0.1))
+    property color barBg: color("@bar-bg", Qt.rgba(0, 0, 0, 0.1))
     property color mainBg: color(Settings.themeMainBg, "#24283b")
     property color mainFg: color(Settings.themeMainFg, "#7aa2f7")
     property color actBg: color(Settings.themeActBg, "#bb9af7")
     property color actFg: color(Settings.themeActFg, "#b4f9f8")
     property color hvrBg: color(Settings.themeHvrBg, "#7aa2f7")
     property color hvrFg: color(Settings.themeHvrFg, "#cfc9c2")
-    property color menuFg: color(Settings.themeMenuFg, "#c0caf5")
+    property color menuFg: color("@gtk-fg", "#c0caf5")
 
     // global.css: JetBrainsMono Nerd Font 10px; border-radius.css: 10pt
     readonly property string font: "JetBrainsMono Nerd Font"

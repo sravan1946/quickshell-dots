@@ -12,6 +12,7 @@ import json
 import os
 import re
 import sys
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -24,16 +25,22 @@ MXM_HEADERS = {
     "Accept": "application/json",
 }
 TOKEN_FILE = os.path.expanduser("~/.cache/quickshell-mxm-token")
+errors = []   # requests that failed (a 404 is just "not there"): on stderr when nothing was found
 
 
 def get(url, params, headers):
     q = urllib.parse.urlencode({k: v for k, v in params.items() if v})
     req = urllib.request.Request(f"{url}?{q}", headers=headers)
+    host = urllib.parse.urlparse(url).netloc
     try:
         with urllib.request.urlopen(req, timeout=8) as r:
             return json.load(r)
-    except Exception:
-        return None
+    except urllib.error.HTTPError as e:
+        if e.code != 404:
+            errors.append(f"{host}: HTTP {e.code}")
+    except Exception as e:
+        errors.append(f"{host}: {getattr(e, 'reason', None) or e!r}")
+    return None
 
 
 def parse_lrc(lrc):
@@ -68,6 +75,8 @@ def mxm_token(renew=False):
         return open(TOKEN_FILE).read().strip()
     r = get(MXM + "token.get", {"app_id": "mac-ios-v2.0"}, MXM_HEADERS)
     tok = ((r or {}).get("message", {}).get("body") or {}).get("user_token")
+    if not tok and r:
+        errors.append(f"musixmatch: no token ({r.get('message', {}).get('header', {}).get('hint') or 'refused'})")
     if tok:   # a captcha answer leaves the old (dead) one in place rather than nothing
         os.makedirs(os.path.dirname(TOKEN_FILE), exist_ok=True)
         with open(TOKEN_FILE, "w") as f:
@@ -88,6 +97,8 @@ def musixmatch(artist, title, album, dur):
         r = (get(MXM + "macro.subtitles.get", {**params, "usertoken": tok}, MXM_HEADERS) or {}).get("message", {})
         if r.get("header", {}).get("status_code") != 401:
             break
+    else:
+        errors.append("musixmatch: token rejected")
     calls = (r.get("body") or {}).get("macro_calls") or {}
     body = lambda call: (calls.get(call) or {}).get("message", {}).get("body") or {}
     rich = body("track.richsync.get").get("richsync")
@@ -159,7 +170,14 @@ if __name__ == "__main__":
     artist, title, album, dur = (sys.argv[1:] + [""] * 4)[:4]
     try:
         words, lines = ([], []) if "--no-musixmatch" in sys.argv[5:] else musixmatch(artist, title, album, dur)
+        # an album or length that doesn't match Musixmatch's (a remix's single, a different
+        # edit) finds nothing at all: try once more on artist and title alone
+        if not (words or lines) and (album or dur) and "--no-musixmatch" not in sys.argv[5:]:
+            words, lines = musixmatch(artist, title, "", "")
     except Exception as e:   # Musixmatch is the flaky one: never let it take lrclib down too
-        print(f"lyrics: musixmatch failed: {e!r}", file=sys.stderr)
+        errors.append(f"musixmatch: {e!r}")
         words, lines = [], []
-    print(json.dumps(words or [split(l) for l in lrclib(artist, title, album, dur)] or lines))
+    out = words or [split(l) for l in lrclib(artist, title, album, dur)] or lines
+    print(json.dumps(out))
+    if not out and errors:
+        print("; ".join(dict.fromkeys(errors)), file=sys.stderr)
