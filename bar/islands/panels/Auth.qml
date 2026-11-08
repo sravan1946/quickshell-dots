@@ -32,6 +32,11 @@ Panel {
     readonly property string stage: AuthState.ok ? "ok"
         : pv === "pass" || pv === "error" || flow?.isResponseRequired ? "pass"
         : finger ? "finger" : "wait"
+    // what success means here: unlocking something (Bitwarden), sudo running the command, or
+    // polkit letting an action through
+    readonly property string done: /unlock/i.test(AuthState.action + " " + AuthState.message) ? "Unlocked"
+        : AuthState.sudo ? "Running it"
+        : "Allowed"
     onStageChanged: if (stage === "pass") {
         field.text = AuthState.typed + field.text
         AuthState.typed = ""
@@ -190,7 +195,7 @@ Panel {
                 id: caption
                 anchors.horizontalCenter: parent.horizontalCenter
                 y: ring.y + ring.height + 12
-                text: p.stage === "ok" ? "Unlocked"
+                text: p.stage === "ok" ? p.done
                     : p.stage === "wait" ? " "
                     : AuthState.skipping ? "Switching to password…"
                     : p.error ? "Not recognised, try again"
