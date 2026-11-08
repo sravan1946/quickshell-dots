@@ -137,6 +137,6 @@ Panel {
         color: ch.hovered ? Look.alert : Look.faint
         font.pixelSize: Look.small
         HoverHandler { id: ch; cursorShape: Qt.PointingHandCursor }
-        TapHandler { onTapped: p.ctl.hide() }
+        TapHandler { onTapped: { NoteState.markRead(); p.ctl.hide() } }
     }
 }

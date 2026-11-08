@@ -43,6 +43,6 @@ Singleton {
         if (!drops.length) emptied()
     }
     // done with one, or all: dismissed (they're in the history)
-    function dismiss(n) { if (!n) return; remove(n); n.tracked = false }
+    function dismiss(n) { if (!n) return; markRead(); remove(n); n.tracked = false }   // touched it = seen it
     function dismissAll() { const all = drops; drops = []; all.forEach(n => n.tracked = false) }
 }
