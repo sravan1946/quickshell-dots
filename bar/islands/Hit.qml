@@ -8,6 +8,7 @@ Item {
     id: hit
 
     property string key: ""          // panel to open on hover, "" = none
+    property bool tapOpens: true     // a finger tap opens the panel; false = it clicks instead (workspaces)
     property bool lit: false         // drawn in the accent (caffeine on, a toggle that's on)
     property bool wash: true         // the hover wash (workspaces colour their number instead)
     property real padX: 6
@@ -41,6 +42,9 @@ Item {
 
     HoverHandler {
         id: hover
+        // a finger doesn't hover: it would open nothing (lifted before the rest is over) and
+        // its lift would close the card; taps are handled below instead
+        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad | PointerDevice.Stylus
         cursorShape: Qt.PointingHandCursor
         onHoveredChanged: if (hit.ctl && hit.key) hovered ? hit.ctl.enter(hit) : hit.ctl.leave(hit)
     }
@@ -49,7 +53,12 @@ Item {
         // reaches up to the screen edge, so a pointer pinned to the top still lands on it
         anchors { fill: parent; topMargin: -Look.top - 3; bottomMargin: -3 }
         acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
-        onClicked: e => hit.clicked(e.button)
+        // a finger arrives here as a synthesized click: it opens the item's panel, which then
+        // stays until tapped again (ctl.tap); an item with no panel just gets the click
+        onClicked: e => {
+            if (hit.key && hit.tapOpens && hit.ctl && e.source !== Qt.MouseEventNotSynthesized) hit.ctl.tap(hit)
+            else hit.clicked(e.button)
+        }
         onWheel: e => {
             hit.wheeled(e.angleDelta.y / 120)
             hit.wheel += e.angleDelta.y

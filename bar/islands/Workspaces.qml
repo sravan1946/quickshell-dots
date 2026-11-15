@@ -92,6 +92,7 @@ Item {
                 key: "ws:" + modelData.id
                 property var arg: modelData
                 wash: false
+                tapOpens: false
                 padX: apps.length ? 7 : 0
                 spacing: 4
                 minWidth: 24

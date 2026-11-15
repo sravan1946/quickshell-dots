@@ -1,0 +1,15 @@
+[Unit]
+Description=Rotate the laptop panel, touchscreen and stylus with the accelerometer
+PartOf=graphical-session.target
+After=graphical-session.target
+# the bar's Auto-rotate tile: this file means "stay off". Not enable/disable, which would
+# delete the symlink this unit is installed through.
+ConditionPathExists=!%h/.local/state/tablet-rotate-off
+
+[Service]
+ExecStart=%h/.config/quickshell/bar/scripts/tablet-mode.sh rotate
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target

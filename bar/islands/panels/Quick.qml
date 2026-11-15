@@ -82,6 +82,31 @@ Panel {
     }
     Timer { id: refreshSoon; interval: 700; onTriggered: NetStats.refresh() }
 
+    // ---- tablet mode: scripts/tablet-mode.sh and its state file (1/0); by hand, because the
+    // hinge switch on this convertible also fires on a tilt ----
+    readonly property bool tabletOn: (tabletFile.text() || "0").trim() === "1"
+    FileView {
+        id: tabletFile
+        path: Quickshell.env("XDG_RUNTIME_DIR") + "/tablet-mode"
+        watchChanges: true
+        onFileChanged: reload()
+    }
+    // auto-rotate is tablet-rotate.service; off keeps the screen as it is, and stays off across
+    // logins (a flag file the unit's ConditionPathExists checks)
+    property bool rotateOn: false
+    Process {
+        id: rotateGet
+        running: true
+        command: ["systemctl", "--user", "is-active", "tablet-rotate.service"]
+        stdout: StdioCollector { onStreamFinished: p.rotateOn = text.trim() === "active" }
+    }
+    function rotateToggle() {
+        const off = "~/.local/state/tablet-rotate-off"
+        Util.run(rotateOn ? `touch ${off}; systemctl --user stop tablet-rotate.service`
+                          : `rm -f ${off}; systemctl --user start tablet-rotate.service`)
+        rotateOn = !rotateOn
+    }
+
     // ---- who, session ----
     Item {
         width: parent.width
@@ -166,6 +191,22 @@ Panel {
             sub: !p.phone ? "Not connected" : `${p.phone.charge}%${p.phone.charging ? " · charging" : ""} · tap to ring`
             on: !!p.phone
             onClicked: p.phone ? Util.run(`kdeconnect-cli -d ${p.phone.id} --ring`) : p.launch("kdeconnect-app")
+        }
+        QTile {
+            Layout.fillWidth: true
+            glyph: 0xF04F7
+            label: "Tablet mode"
+            sub: on ? "Keyboard off" : "Off"
+            on: p.tabletOn
+            onClicked: Util.run(Qt.resolvedUrl("../../scripts/tablet-mode.sh").toString().replace("file://", "") + " toggle")
+        }
+        QTile {
+            Layout.fillWidth: true
+            glyph: on ? 0xF0457 : 0xF0458
+            label: "Auto-rotate"
+            sub: on ? "On" : "Locked"
+            on: p.rotateOn
+            onClicked: p.rotateToggle()
         }
     }
 

@@ -65,6 +65,7 @@ Scope {
             Region { item: centre.hitBox }
             Region { item: right.hitBox }
             Region { item: card.open || card.closing ? card : null }
+            Region { item: win.pinned ? bar : null }   // a tapped-open card: the whole screen, so a tap anywhere else closes it
         }
 
         IdleInhibitor { window: win; enabled: Config.caffeine }
@@ -77,7 +78,18 @@ Scope {
         property var hits: ({})          // key -> Hit, for IPC
         function register(h) { if (h.key) hits[h.key] = h }
 
+        // a card opened by a finger is pinned: nothing hovers to hold it open, and the touch's
+        // synthesized pointer coming and going mustn't close it. A tap on its item (or a real
+        // pointer arriving on an item later) lets go.
+        property bool pinned: false
+        function tap(h) {
+            dwell.stop(); aimWait.stop(); pending = null
+            if (pinned && card.open && !card.closing && hot === h) { hide(); return }   // only one a tap opened: a slow tap's own hover may have opened this one
+            show(h, true)
+            pinned = true
+        }
         function enter(h) {
+            if (pinned) { if (h === hot) return; pinned = false }
             leaveT.stop()
             if (card.open && !card.closing) {
                 if (h !== hot && aiming()) { pending = h; aimWait.restart() }   // just passing on the way to the card
@@ -86,6 +98,7 @@ Scope {
             else { pending = h; dwell.restart() }
         }
         function leave(h) {
+            if (pinned) return
             if (pending === h) { dwell.stop(); aimWait.stop(); pending = null }
             leaveT.restart()
         }
@@ -113,13 +126,13 @@ Scope {
         Timer {
             id: leaveT
             interval: 160
-            onTriggered: if (!cardHover.hovered && !(win.hot?.hovered ?? false)) win.hide()
+            onTriggered: if (!win.pinned && !cardHover.hovered && !(win.hot?.hovered ?? false)) win.hide()
         }
         // an authentication prompt stays until it is answered or cancelled: hover, clicks and
         // other drops don't move the card away from it
         readonly property bool authing: card.key === "auth" && AuthState.showing
         function show(h, sticky) { if (authing) return; card.attach(h); if (sticky) leaveT.stop() }
-        function hide() { if (!authing) card.detach() }
+        function hide() { pinned = false; if (!authing) card.detach() }
         function toggle(h) { card.open && hot === h ? hide() : show(h) }
 
         // ---- the beat: each kick's wave leaves from the music (Isle; the window border too, BeatGlow) ----
@@ -149,6 +162,7 @@ Scope {
             id: bar
             anchors.fill: parent
             HoverHandler { onPointChanged: win.track(point.position) }
+            MouseArea { anchors.fill: parent; enabled: win.pinned; acceptedButtons: Qt.AllButtons; onPressed: win.hide() }
 
             Island {
                 id: left
@@ -564,6 +578,7 @@ Scope {
         HoverHandler {
             id: cardHover
             target: card
+            acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad | PointerDevice.Stylus   // a finger lifting off the card mustn't close it
             onHoveredChanged: hovered ? leaveT.stop() : leaveT.restart()
         }
 
