@@ -31,8 +31,11 @@ Item {
     property real r: 0
     property int was: 0
     function place(animate) {
-        const it = row.children.find(c => c.wsId === active)
+        const it = row.children.find(c => c.wsId === active && c.visible)
         if (!it) return
+        // a delegate that was just created sits at x 0 until the Row positions it; its onXChanged
+        // calls back here once it has
+        if (it.x === 0 && it !== row.children.find(c => c.wsId && c.visible)) return
         const a = it.x, b = it.x + it.width
         if (!animate) { lead.stop(); trail.stop(); l = a; r = b; was = active; return }
         const fwd = active > was
@@ -42,7 +45,6 @@ Item {
         was = active
     }
     onActiveChanged: Qt.callLater(place, true)
-    Connections { target: row; function onImplicitWidthChanged() { Qt.callLater(ws.place, ws.was !== 0) } }
     Component.onCompleted: Qt.callLater(place, false)
     NumberAnimation {
         id: lead
@@ -80,10 +82,13 @@ Item {
         id: row
         height: Look.item
         Repeater {
-            model: ws.list
+            // the live model, not ws.list: a JS array is a new model on every workspace add/remove
+            // and the Repeater would rebuild every button (at x 0, at min width) each time
+            model: Hyprland.workspaces
             Hit {
                 id: w
                 required property HyprlandWorkspace modelData
+                visible: modelData.id > 0 && modelData.monitor === ws.monitor
                 readonly property int wsId: modelData.id
                 readonly property bool on: modelData.id === ws.active
                 readonly property bool urgent: modelData.urgent && !on
@@ -97,6 +102,9 @@ Item {
                 spacing: 4
                 minWidth: 24
                 Component.onCompleted: ws.ctl?.register(this)
+                // follow the active button as neighbours come and go and its app icons change
+                onXChanged: if (on) Qt.callLater(ws.place, ws.was !== 0)
+                onWidthChanged: if (on) Qt.callLater(ws.place, ws.was !== 0)
                 onClicked: b => { if (b === Qt.LeftButton) ws.goto(modelData.id) }
                 onScrolled: s => ws.step(-s)
 
