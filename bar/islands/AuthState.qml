@@ -183,6 +183,7 @@ Singleton {
         function ask(fifo: string, pid: int, cmd: string, cwd: string): void {
             if (s.flow) { Quickshell.execDetached(["sh", "-c", 'echo C > "$1"', "sh", fifo]); return }
             const again = s.sudo && pid === s.sudoPid
+            ttyT.stop()   // the askpass came: not a terminal sudo after all
             s.sudoStart(pid, cmd, cwd)
             s.fifo = fifo
             if (s.cancelled) { s.reply("C"); return }

@@ -2,3 +2,5 @@ hypr/beatglow/beatglow.so
 # shows a terminal prompt with a work email
 hypr/beatglow/preview.png
 __pycache__/
+hypr/beatglow/beatglow-*.so
+hypr/beatglow/*.tmp

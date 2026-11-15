@@ -166,8 +166,11 @@ Scope {
                         Toggle { title: "Lyrics in the bar"; sub: "The line being sung replaces the title while it's sung"; on: Settings.lyricsInBar; onFlip: Settings.lyricsInBar = !Settings.lyricsInBar }
                         Head { text: "Beat glow" }
                         Toggle { title: "Beat effects"; sub: "The wave on the window border"; on: Settings.beatEffects; onFlip: Settings.beatEffects = !Settings.beatEffects }
-                        Num { title: "Wave reach"; from: 400; to: 5000; step: 50; unit: " px"; value: Settings.waveReach; onEdit: v => Settings.waveReach = v }
-                        Num { title: "Wave length"; from: 0.2; to: 3; step: 0.05; unit: " s"; value: Settings.waveDur; onEdit: v => Settings.waveDur = v }
+                        Num { title: "Launch speed"; sub: "As it leaves the music"; from: 1000; to: 10000; step: 100; unit: " px/s"; value: Settings.waveSpeed; onEdit: v => Settings.waveSpeed = v }
+                        Num { title: "Cruise speed"; sub: "What it slows to and keeps, round cards too"; from: 300; to: 5000; step: 50; unit: " px/s"; value: Settings.waveCruise; onEdit: v => Settings.waveCruise = v }
+                        Num { title: "Fade"; sub: "Distance it dims over; 0 never dims"; from: 0; to: 6000; step: 100; unit: " px"; value: Settings.waveFade; onEdit: v => Settings.waveFade = v }
+                        Num { title: "Head"; sub: "Length of the bright head"; from: 8; to: 200; step: 2; unit: " px"; value: Settings.waveHead; onEdit: v => Settings.waveHead = v }
+                        Num { title: "Tail"; sub: "How long the line it leaves stays"; from: 0.05; to: 1; step: 0.01; unit: " s"; value: Settings.waveTail; onEdit: v => Settings.waveTail = v }
                         Toggle { title: "Colour by sound"; sub: "Off: every kick is the cover colour"; on: Settings.kickTimbre; onFlip: Settings.kickTimbre = !Settings.kickTimbre }
                         Num { title: "Hue shift"; from: 0; to: 120; step: 1; unit: "°"; value: Settings.kickHue; onEdit: v => Settings.kickHue = v }
                         Num { title: "Lightness shift"; from: 0; to: 0.3; step: 0.01; value: Settings.kickLight; onEdit: v => Settings.kickLight = v }

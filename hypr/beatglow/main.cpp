@@ -6,8 +6,12 @@
 // below where it passes, splits, and runs both ways round the border to meet at the bottom: a
 // white-hot comet head on the border line (~45 ms) with a bloom outside it, then a thin line in
 // the kick's colour cooling towards the cover's second colour (~0.2 s), as the bar's islands
-// draw it (shaders/isle.frag). Timed on its own clock from the kick, so nothing is sent per
-// frame; the front matches the bar's (same easing and speed).
+// draw it (shaders/wave.frag). Timed on its own clock from the kick, so nothing is sent per
+// frame; the pulse is the bar's own model (Visualizer.arrive: launch speed easing to a cruise,
+// a head of fixed length, a tail, dimming with distance), sent with each kick.
+// While one of the bar's cards hangs down over the window, the bar also sends its box (`beatglow
+// mask`), and the glow stays out of it: the card is see-through enough to show a border lit
+// underneath it, which read as the bar's own wave running down the card from the wrong side.
 //
 // Build: make (see Makefile). Load: hyprctl plugin load ~/.config/hypr/plugins/beatglow/beatglow.so
 
@@ -47,15 +51,26 @@ struct SBeat {
 };
 
 static struct {
-    std::array<SBeat, 4>          beats;              // newest first
-    float                         dur   = 1.0f;       // the bar wave: s to run `reach` px,
-    float                         reach = 2600.f;     // easing out (cubic)
+    std::array<SBeat, 8>          beats;              // newest first
+    // the pulse (the bar's Visualizer.arrive): px/s it leaves at, px/s it settles to and over how
+    // many px, px it dims over (0 never), its head's length (px), its line's fade (s)
+    float v0 = 4500, v1 = 1800, bend = 280, fade = 2000, head = 90, tail = 0.22f;
     std::array<float, 3>          c1 = {0.8f, 0.6f, 1.f}, c2 = {0.5f, 0.6f, 1.f};   // the kick's colour, the cover's second
     std::map<std::string, double> origins;            // monitor name -> global x the wave starts at
+    std::map<std::string, std::array<float, 5>> masks; // monitor name -> the bar card's box: global x, y, w, h, corner radius
 } g_state;
 
-static constexpr float GLOW     = 22.f;   // bloom reach outside the border, logical px
-static constexpr float LIFETIME = 3.f;    // s after which a beat can't light anything any more
+static constexpr float GLOW = 22.f;   // bloom reach outside the border, logical px
+
+// when the pulse reaches d px along (as in the shader)
+static float arrive(float d) {
+    const auto& g = g_state;
+    return (d + g.bend * std::log((g.v1 + (g.v0 - g.v1) * std::exp(-d / g.bend)) / g.v0)) / g.v1;
+}
+// s after which a beat can't light anything any more: round the largest window, tail gone
+static float lifetime() {
+    return arrive(4000) + 5 * g_state.tail;
+}
 
 static float ageOf(const SBeat& b) {
     return std::chrono::duration<float>(Clock::now() - b.at).count();
@@ -63,25 +78,42 @@ static float ageOf(const SBeat& b) {
 
 static bool anyLive() {
     for (const auto& b : g_state.beats)
-        if (b.strength > 0 && ageOf(b) < LIFETIME)
+        if (b.strength > 0 && ageOf(b) < lifetime())
             return true;
     return false;
 }
 
-// `beatglow beat <strength> <dur> <reach> <r1> <g1> <b1> <r2> <g2> <b2> [monitor=x ...]`
+// `beatglow beat <strength> <v0> <v1> <bend> <fade> <head> <tail> <r1> <g1> <b1> <r2> <g2> <b2> [monitor=x ...]`
+// `beatglow mask <monitor> <x> <y> <w> <h> <radius>`: keep out of that box (global logical px);
+// `beatglow mask <monitor>` alone: no box there any more
 static IPC::Socket1::SResponse onCommand(const IPC::Socket1::SRequest& req) {
     std::istringstream in(req.command);
     std::string        cmd, sub;
     in >> cmd >> sub;
+    if (sub == "mask") {
+        std::string          mon;
+        std::array<float, 5> m;
+        if (!(in >> mon))
+            return "error: no monitor";
+        if (in >> m[0] >> m[1] >> m[2] >> m[3] >> m[4])
+            g_state.masks[mon] = m;
+        else
+            g_state.masks.erase(mon);
+        return "ok";
+    }
     if (sub != "beat")
-        return "usage: beatglow beat <strength> <dur> <reach> <r1> <g1> <b1> <r2> <g2> <b2> [monitor=x ...]";
+        return "usage: beatglow beat <strength> <v0> <v1> <bend> <fade> <head> <tail> <r1> <g1> <b1> <r2> <g2> <b2> [monitor=x ...] | beatglow mask <monitor> [x y w h radius]";
 
     SBeat b{Clock::now(), 0};
-    float dur, reach;
-    if (!(in >> b.strength >> dur >> reach >> g_state.c1[0] >> g_state.c1[1] >> g_state.c1[2] >> g_state.c2[0] >> g_state.c2[1] >> g_state.c2[2]))
+    float v0, v1, bend, fade, head, tail;
+    if (!(in >> b.strength >> v0 >> v1 >> bend >> fade >> head >> tail >> g_state.c1[0] >> g_state.c1[1] >> g_state.c1[2] >> g_state.c2[0] >> g_state.c2[1] >> g_state.c2[2]))
         return "error: bad numbers";
-    g_state.dur   = std::max(0.05f, dur);
-    g_state.reach = std::max(100.f, reach);
+    g_state.v0   = std::max(50.f, v0);
+    g_state.v1   = std::clamp(v1, 20.f, g_state.v0);
+    g_state.bend = std::max(1.f, bend);
+    g_state.fade = std::max(0.f, fade);
+    g_state.head = std::max(1.f, head);
+    g_state.tail = std::max(0.01f, tail);
     for (std::string kv; in >> kv;) {
         const auto eq = kv.find('=');
         if (eq != std::string::npos)
@@ -98,8 +130,10 @@ static IPC::Socket1::SResponse onCommand(const IPC::Socket1::SRequest& req) {
 
 // Draws over the border box grown by `range` on every side. Uniform names are the ones
 // Hyprland's CShader looks up; `gradient` carries our data:
-//   [0] beat ages (s)  [1] strengths  [2] c1  [3] c2
-//   [4] x: wave origin, px from the border box's left  y: reach (logical px)  z: dur (s)  w: px per logical px
+//   [0] [1] the eight beats' ages (s), newest first  [2] [3] their strengths  [4] c1  [5] c2
+//   [6] x: wave origin, px from the border box's left  y: v0  z: v1  w: px per logical px
+//   [7] x: bend  y: fade  z: head (logical px; fade 0 = never)  w: tail (s)
+//   [8] the bar card to keep out of: x0, y0, x1, y1 in px of this box (x1 <= x0: none)  [9] x: its corner radius, px
 static const char* VERT = R"(#version 300 es
 uniform mat3 proj;
 in vec2 pos;
@@ -154,40 +188,40 @@ void main() {
 
     // path distance (logical px) from where the wave started: along the bar to the top edge
     // right under it, then round the border both ways
-    float sc = gradient[4].w;
+    float sc = gradient[6].w;
     float L  = 2.0 * (S.x + S.y - 4.0 * r) + 4.0 * HPI * r;
-    float ex = clamp(gradient[4].x, r, S.x - r);
-    float h0 = abs(gradient[4].x - ex);
+    float ex = clamp(gradient[6].x, r, S.x - r);
+    float h0 = abs(gradient[6].x - ex);
     float cw = mod(perim(p, S, r) - (ex - r), L);   // clockwise from the start
     float pd = (h0 + min(cw, L - cw)) / sc;
 
-    // along the top edge the front is the bar's own (its reach and dur), so both reach the
-    // window's top corners together. Past the corner, where the bar's wave slows to a stop, it
-    // carries on at the speed it had there and eases out round the rest of the window.
-    float reach = gradient[4].y, dur = gradient[4].z;
-    float ce = min((h0 + (cw <= L - cw ? S.x - r - ex : ex - r)) / sc, 0.85 * reach);   // to the top edge's end, this way
-    float R2 = (h0 + 0.5 * L) / sc + 60.0 - ce;   // the rest, to the far side
-    float D2 = R2 * dur / (reach * pow(1.0 - ce / reach, 2.0 / 3.0));   // same speed at the corner
-    float at = pd <= ce ? dur * (1.0 - pow(1.0 - pd / reach, 1.0 / 3.0))
-                       : dur * (1.0 - pow(1.0 - ce / reach, 1.0 / 3.0)) + D2 * (1.0 - pow(max(0.0, 1.0 - (pd - ce) / R2), 1.0 / 3.0));
+    // the bar's pulse (Visualizer.arrive, shaders/wave.frag: keep them alike): speed pd px along
+    // is v1 + (v0 - v1) e^(-pd/bend), so it reaches the window's top corners with the bar's own
+    // front and keeps going round at the cruise speed. The head is `head` px long behind the
+    // front at any speed; the line it leaves fades over `tail` s; it dims over `fade` px.
+    float v0 = gradient[6].y, v1 = gradient[6].z, bend = gradient[7].x, fade = gradient[7].y;
+    float headPx = gradient[7].z, tail = gradient[7].w;
+    float vhere = v1 + (v0 - v1) * exp(-pd / bend);
+    float at = (pd + bend * log(vhere / v0)) / v1;
+    float amp = fade > 0.0 ? exp(-pd / fade) : 1.0;
 
     float flash = 0.0, after = 0.0;
-    for (int k = 0; k < 4; k++) {
-        float pw = gradient[1][k];
-        if (pw <= 0.0) continue;
-        float dt = gradient[0][k] - at;   // since the front passed
-        if (dt < 0.0) {   // just ahead of it: a soft leading edge, no hard cut
-            flash += pw * exp(dt / 0.012);
-            continue;
+    for (int i = 0; i < 2; i++)
+        for (int k = 0; k < 4; k++) {
+            float pw = gradient[2 + i][k];
+            if (pw <= 0.0) continue;
+            float dt = gradient[i][k] - at;   // since the front passed
+            float px = dt * vhere;             // px behind it (< 0: ahead)
+            if (px < -6.0) continue;
+            float on = smoothstep(-6.0, 0.0, px) * pw * amp;   // a soft leading edge, no hard cut
+            flash += on * exp(-max(px, 0.0) / headPx);
+            after += on * 0.3 * exp(-max(dt, 0.0) / tail);
         }
-        flash += pw * exp(-dt / 0.045);
-        after += pw * 0.3 * exp(-dt / 0.22);
-    }
     flash = min(flash, 1.0);
     after = min(after, 1.0);
     if (flash + after < 0.003) discard;
 
-    vec3  c1 = gradient[2].rgb, c2 = gradient[3].rgb;
+    vec3  c1 = gradient[4].rgb, c2 = gradient[5].rgb;
     // the line cools from the kick's colour towards the cover's second, with more colour than the
     // cover's pastels have (they go muddy dim); the head burns white
     vec3  kc   = mix(c1, c2, 0.35 * after / (flash + after + 1e-4));
@@ -208,6 +242,17 @@ void main() {
     vec4 c = vec4(bc * ba, ba);
     c = vec4(kc * ia, ia) + c * (1.0 - ia);
     c = vec4(lc * la, la) + c * (1.0 - la);
+
+    // nothing under the bar's card (it would show through it)
+    vec4 mb = gradient[8];
+    if (mb.z > mb.x) {
+        vec2  pf = v_texcoord * fullSize;
+        vec2  hs = 0.5 * (mb.zw - mb.xy);
+        float mr = min(gradient[9].x, min(hs.x, hs.y));
+        vec2  mq = abs(pf - 0.5 * (mb.xy + mb.zw)) - hs + mr;
+        float md = length(max(mq, 0.0)) + min(max(mq.x, mq.y), 0.0) - mr;   // > 0 outside the card
+        c *= smoothstep(-sc, sc, md);
+    }
     fragColor = c * alpha;
 }
 )";
@@ -313,19 +358,31 @@ class CBeatGlow : public IHyprWindowDecoration {
         const float ox = (g_state.origins.at(w->m_monitor->m_name) - (layout.x + GLOW)) * sc;
 
         std::vector<float> data(40, 0.f);
-        for (size_t k = 0; k < 4; ++k) {
+        for (size_t k = 0; k < 8; ++k) {
             data[k]     = ageOf(g_state.beats[k]);
-            data[4 + k] = g_state.beats[k].strength;
+            data[8 + k] = g_state.beats[k].strength;
         }
         for (size_t i = 0; i < 3; ++i) {
-            data[8 + i]  = g_state.c1[i];
-            data[12 + i] = g_state.c2[i];
+            data[16 + i] = g_state.c1[i];
+            data[20 + i] = g_state.c2[i];
         }
-        data[11] = data[15] = 1;
-        data[16] = ox;
-        data[17] = g_state.reach;
-        data[18] = g_state.dur;
-        data[19] = sc;
+        data[19] = data[23] = 1;
+        data[24] = ox;
+        data[25] = g_state.v0;
+        data[26] = g_state.v1;
+        data[27] = sc;
+        data[28] = g_state.bend;
+        data[29] = g_state.fade;
+        data[30] = g_state.head;
+        data[31] = g_state.tail;
+        if (const auto m = g_state.masks.find(w->m_monitor->m_name); m != g_state.masks.end()) {
+            const auto& [mx, my, mw, mh, mr] = m->second;
+            data[32] = (mx - layout.x) * sc;
+            data[33] = (my - layout.y) * sc;
+            data[34] = (mx + mw - layout.x) * sc;
+            data[35] = (my + mh - layout.y) * sc;
+            data[36] = mr * sc;
+        }
 
         const bool blend = glIsEnabled(GL_BLEND);
         g_pHyprOpenGL->blend(true);

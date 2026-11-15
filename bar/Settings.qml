@@ -38,10 +38,13 @@ Singleton {
         netColUp: "#ffcc66",
         netInterval: 2000,     // ms between samples
 
-        // beat wave every rim/edge effect rides: how far (px) and how long (s)
-        beatEffects: true,     // off: no beat wave, pill rims, window-border glow or sparks
-        waveReach: 1500,       // leaves the music at ~4000 px/s, across the bar in ~0.25 s
-        waveDur: 1.1,
+        // each kick's wave along the bar, round a card and the window's border (Visualizer.arrive)
+        beatEffects: true,     // off: no beat wave, window-border glow or sparks
+        waveSpeed: 4500,       // px/s it leaves the music at...
+        waveCruise: 1800,      // ...slowing to this over its first few hundred px, and keeping it
+        waveFade: 2000,        // px over which it dims to ~37% (0: never dims)
+        waveHead: 90,          // px: the bright head's length, the same at any speed
+        waveTail: 0.22,        // s the line it leaves takes to fade
         // kick detector (scripts/kicks.py): a kick is the bass band rising by more than
         // kickFloor dB in 30 ms, at least kickGap s after the last (scored on 20 tracks 2026-10-27)
         kickFloor: 4,
@@ -96,8 +99,11 @@ Singleton {
     property string netColUp:      defaults.netColUp
     property int    netInterval:   defaults.netInterval
     property bool   beatEffects:   defaults.beatEffects
-    property real   waveReach:     defaults.waveReach
-    property real   waveDur:       defaults.waveDur
+    property real   waveSpeed:     defaults.waveSpeed
+    property real   waveCruise:    defaults.waveCruise
+    property real   waveFade:      defaults.waveFade
+    property real   waveHead:      defaults.waveHead
+    property real   waveTail:      defaults.waveTail
     property real   kickFloor:     defaults.kickFloor
     property real   kickGap:       defaults.kickGap
     property real   kickMargin:    defaults.kickMargin

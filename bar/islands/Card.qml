@@ -10,8 +10,8 @@ import qs
 // corners where they meet (rule 22) and, with more reach, pulls a neck of surface between them.
 // Opening and closing run on one progress value (rule 8): the card flows down out of the item
 // as a bead of the island's surface, its neck thinning into the fillets as it fills out to
-// full size, and closing draws it back up the same way. Its outline carries each kick's wave on
-// from the island's edge (from `originX`, in the bar's coordinates, as the islands' Isles do).
+// full size, and closing draws it back up the same way. Each kick's wave round its outline is
+// islands/Wave.qml's, drawn over it from these same numbers (bodyR, goo, fL/fR).
 Item {
     id: card
 
@@ -20,7 +20,6 @@ Item {
     property Item it: null           // the Hit it hangs from
     property string key: ""          // which panel: the Hit's key, or what attach() was asked for
     property Item isl: null          // that Hit's island
-    property real originX: 0
     property bool open: false
     property bool closing: false
     readonly property bool shown: open || closing
@@ -78,12 +77,15 @@ Item {
     readonly property real overlap: isl ? Math.min(x + width, isl.x + isl.width) - Math.max(x, isl.x) : 0
     readonly property real k: !isl ? 0 : clamp(overlap / 30, 0, 1) * clamp(height / 14, 0, 1)
     function joinOf(i) { return i === isl ? k : 0 }
-    // for the island's Isle: the span of its floor the card hangs from, in its coordinates, and
-    // how far the necks reach out either side of it (the floor there is inside the card's surface too)
-    function cutOf(i) { return i === isl ? Qt.vector4d(x - isl.x, x + width - isl.x, k, goo) : Qt.vector4d(0, 0, 0, 0) }
     // island bottom corners: square where the card runs flush or past, round where the card sits inside
     function cornerL(i) { return Look.h / 2 * (i === isl && gapL <= 1 ? 1 - k : 1) }
     function cornerR(i) { return Look.h / 2 * (i === isl && gapR <= 1 ? 1 - k : 1) }
+    // its own corners (tl, tr, br, bl): square at the top where it runs flush with the island
+    readonly property vector4d bodyR: Qt.vector4d(16 - 16 * (gapL >= -1 ? k : 0), 16 - 16 * (gapR >= -1 ? k : 0),
+        Math.min(20, height / 2), Math.min(20, height / 2))
+    // 0 = an edge flush with the island's (no merge along it: collinear edges would bulge), 1 = clear
+    readonly property real fL: clamp(Math.abs(gapL) / 8, 0, 1)
+    readonly property real fR: clamp(Math.abs(gapR) / 8, 0, 1)
 
     RectangularShadow {
         z: -1
@@ -106,8 +108,7 @@ Item {
         height: card.y + card.height + m - y0
         visible: !!card.isl
         property vector4d body: Qt.vector4d(m, card.y - y0, card.width, card.height)
-        property vector4d bodyR: Qt.vector4d(16 - 16 * (card.gapL >= -1 ? card.k : 0), 16 - 16 * (card.gapR >= -1 ? card.k : 0),
-            Math.min(20, card.height / 2), Math.min(20, card.height / 2))
+        property vector4d bodyR: card.bodyR
         property vector4d isle: card.isl ? Qt.vector4d(card.isl.x - card.x + m, card.isl.y - y0, card.isl.width, card.isl.height)
             : Qt.vector4d(0, 0, 0, 0)
         property vector4d isleR: card.isl ? Qt.vector4d(card.isl.topLeftRadius, card.isl.topRightRadius,
@@ -116,21 +117,9 @@ Item {
         property vector2d res: Qt.vector2d(width, height)
         property real goo: card.goo
         property real dpr: card.dpr
-        property real fL: card.clamp(Math.abs(card.gapL) / 8, 0, 1)
-        property real fR: card.clamp(Math.abs(card.gapR) / 8, 0, 1)
-        property real ox: card.originX - card.x + m
-        property vector4d ages: {
-            const a = Visualizer.beatAts, t = Visualizer.t
-            return Qt.vector4d(t - a.x, t - a.y, t - a.z, t - a.w)
-        }
-        property vector4d punches: Visualizer.beatPows
-        property real dur: Visualizer.waveDur
-        property real reach: Visualizer.waveReach
-        property vector4d kr: Visualizer.beatR
-        property vector4d kg: Visualizer.beatG
-        property vector4d kb: Visualizer.beatB
-        property color c2: Player.c2
-        fragmentShader: Qt.resolvedUrl("../shaders/goo.frag.qsb?v=33fbdde2")
+        property real fL: card.fL
+        property real fR: card.fR
+        fragmentShader: Qt.resolvedUrl("../shaders/goo.frag.qsb?v=f70edfa9")
     }
 
     Item {

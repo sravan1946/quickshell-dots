@@ -15,6 +15,8 @@ ShellRoot {
         target: "bar"
         function toggle(): void { Config.barVisible = !Config.barVisible }
         function reload(): void { Quickshell.reload(false) }
+        // a kick on demand, for testing the beat effects (lands now, on the next frame; needs music playing)
+        function kick(strength: real): void { Visualizer.kick(Math.min(1, strength), Visualizer.hold) }
     }
     // Quickshell's own watcher misses every other save made by renaming a new file over the
     // old one (sed -i, most editors): reloads come from quickshell-bar-reload.path instead

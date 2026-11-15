@@ -21,14 +21,21 @@ Singleton {
     property int peakUsers: 0
     property double beatAt: -10   // `t` of the latest beat
     property real beatStrength: 0 // 0..1, how hard it hit relative to recent kicks
-    // the last four beats, newest in x: their `t`s and strengths (for overlapping effects)
+    // the last eight beats, newest first: their `t`s and strengths, four to a vec4 (beatAts the
+    // newest four, beatAts2 the four before), for the waves still out at once. Eight, as a wave
+    // round a tall card lives ~1.5 s and kicks can come every kickGap (0.18 s).
     property vector4d beatAts: Qt.vector4d(-10, -10, -10, -10)
+    property vector4d beatAts2: Qt.vector4d(-10, -10, -10, -10)
     property vector4d beatPows: zero
-    // ...and their colours, one channel per vec4 (newest in x), from what each kick sounded
-    // like (timbre(), kickColor()); beatCol is the newest one's
+    property vector4d beatPows2: zero
+    // ...and their colours, one channel per vec4, from what each kick sounded like (timbre(),
+    // kickColor()); beatCol is the newest one's
     property vector4d beatR: zero
     property vector4d beatG: zero
     property vector4d beatB: zero
+    property vector4d beatR2: zero
+    property vector4d beatG2: zero
+    property vector4d beatB2: zero
     property color beatCol: "white"
     // s since the shell started, time of the latest frame: a clock that ticks only while
     // frames arrive. Kept small: beat times also travel in vec4s, which are 32-bit floats
@@ -37,22 +44,26 @@ Singleton {
     readonly property double epoch: Date.now() / 1000
     signal beat(real strength)    // 0..1
 
-    // The beat wave every effect rides (media pill rim, bar edge, other pills' rims, the
-    // window border): each kick sends one out both ways from the media pill, fast at first
-    // and slowing. For the last four beats, newest in x: px its front has travelled, and how
-    // bright it still is (0 once spent). Both stop changing once all four are spent.
-    readonly property real waveDur: Settings.waveDur
-    readonly property real waveReach: Settings.waveReach   // px travelled by the end
-    readonly property vector4d waveFronts: {
-        const a = beatAts
-        const f = at => waveReach * (1 - Math.pow(1 - Math.min(1, Math.max(0, (t - at) / waveDur)), 3))
-        return Qt.vector4d(f(a.x), f(a.y), f(a.z), f(a.w))
+    // The beat wave (islands/Wave.qml on the bar, the beatglow plugin on the window border,
+    // both with this same model): each kick sends a pulse out from the music along the outline,
+    // leaving at waveSpeed and slowing smoothly to waveCruise over its first few hundred px
+    // (speed at d px: cruise + (speed - cruise) e^(-d/bend)), then holding it, so it gets round
+    // any card or window instead of stalling. arrive(d) is when it reaches d px along: zero at the
+    // music, closed-form at any distance. It dims over waveFade px; its head is waveHead px long.
+    readonly property real waveSpeed: Settings.waveSpeed
+    readonly property real waveCruise: Math.min(Settings.waveCruise, waveSpeed)
+    readonly property real waveBend: 280
+    readonly property real waveFade: Settings.waveFade
+    readonly property real waveHead: Settings.waveHead
+    readonly property real waveTail: Settings.waveTail
+    function arrive(d) {
+        const v0 = waveSpeed, v1 = waveCruise, l = waveBend
+        return (d + l * Math.log((v1 + (v0 - v1) * Math.exp(-d / l)) / v0)) / v1
     }
-    readonly property vector4d waveFades: {
-        const a = beatAts, p = beatPows
-        const f = (at, pw) => pw * Math.pow(1 - Math.min(1, Math.max(0, (t - at) / waveDur)), 1.5)
-        return Qt.vector4d(f(a.x, p.x), f(a.y, p.y), f(a.z, p.z), f(a.w, p.w))
-    }
+    // how long after its kick a wave can still light anything: out to ~3200 px (across the bar
+    // and round the tallest card), then its tail gone
+    readonly property real waveLife: arrive(3200) + 5 * waveTail
+
     // global x (logical px) each screen's wave starts from, by screen name: set by its media pill
     property var origins: ({})
 
@@ -88,9 +99,9 @@ Singleton {
         active = false
         beatAt = -10       // no beat light frozen mid-run while paused
         beatStrength = 0
-        beatAts = Qt.vector4d(-10, -10, -10, -10)
-        beatPows = zero
-        beatR = beatG = beatB = zero
+        beatAts = beatAts2 = Qt.vector4d(-10, -10, -10, -10)
+        beatPows = beatPows2 = zero
+        beatR = beatG = beatB = beatR2 = beatG2 = beatB2 = zero
         pending = []
         queued = 0
     }
@@ -114,12 +125,15 @@ Singleton {
             const c = k.c ?? kickColor(timbre())
             beatAt = k.at
             beatStrength = k.s
-            beatAts = Qt.vector4d(k.at, beatAts.x, beatAts.y, beatAts.z)
-            beatPows = Qt.vector4d(k.s, beatPows.x, beatPows.y, beatPows.z)
+            // push in at the front of the eight: x of the first four, its w on into the second
+            const in2 = (a, b) => Qt.vector4d(a.w, b.x, b.y, b.z)
+            const in1 = (a, v) => Qt.vector4d(v, a.x, a.y, a.z)
+            beatAts2 = in2(beatAts, beatAts2); beatAts = in1(beatAts, k.at)
+            beatPows2 = in2(beatPows, beatPows2); beatPows = in1(beatPows, k.s)
+            beatR2 = in2(beatR, beatR2); beatR = in1(beatR, c.r)
+            beatG2 = in2(beatG, beatG2); beatG = in1(beatG, c.g)
+            beatB2 = in2(beatB, beatB2); beatB = in1(beatB, c.b)
             beatCol = c
-            beatR = Qt.vector4d(c.r, beatR.x, beatR.y, beatR.z)
-            beatG = Qt.vector4d(c.g, beatG.x, beatG.y, beatG.z)
-            beatB = Qt.vector4d(c.b, beatB.x, beatB.y, beatB.z)
             beat(k.s)
         }
     }
@@ -204,7 +218,7 @@ Singleton {
     // cava's frames come 30 times a second; while a wave is out (or a kick waits) the clock
     // runs with the screen instead, so the light moves every frame
     FrameAnimation {
-        running: viz.active && (viz.queued > 0 || viz.t - viz.beatAt < viz.waveDur)
+        running: viz.active && (viz.queued > 0 || viz.t - viz.beatAt < viz.waveLife)
         onTriggered: { viz.t = Date.now() / 1000 - viz.epoch; viz.release() }
     }
 

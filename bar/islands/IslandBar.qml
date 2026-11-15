@@ -135,7 +135,7 @@ Scope {
         function hide() { pinned = false; if (!authing) card.detach() }
         function toggle(h) { card.open && hot === h ? hide() : show(h) }
 
-        // ---- the beat: each kick's wave leaves from the music (Isle; the window border too, BeatGlow) ----
+        // ---- the beat: each kick's wave leaves from the music (Wave; the window border too, BeatGlow) ----
         property real beatX: width / 2
         Connections {
             target: Visualizer
@@ -170,7 +170,7 @@ Scope {
                 join: card.joinOf(left)
                 bl: card.cornerL(left)
                 br: card.cornerR(left)
-                Isle { parent: left.deco; island: left; originX: win.beatX; cut: card.cutOf(left)
+                Isle { parent: left.deco; island: left
                     // the music's own light, under the media item
                     eq: media.shown ? Qt.vector2d(left.row.x + media.x + mediaHit.x, left.row.x + media.x + mediaHit.x + mediaHit.width) : Qt.vector2d(0, 0)
                 }
@@ -282,7 +282,6 @@ Scope {
                 join: card.joinOf(centre)
                 bl: card.cornerL(centre)
                 br: card.cornerR(centre)
-                Isle { parent: centre.deco; island: centre; originX: win.beatX; cut: card.cutOf(centre) }
 
                 Hit {
                     key: "caf"
@@ -333,7 +332,6 @@ Scope {
                 join: card.joinOf(right)
                 bl: card.cornerL(right)
                 br: card.cornerR(right)
-                Isle { parent: right.deco; island: right; originX: win.beatX; cut: card.cutOf(right) }
 
                 Hit {
                     key: "net"
@@ -574,7 +572,42 @@ Scope {
         }
 
         // ---------------- the card ----------------
-        Card { id: card; ctl: win; islands: [left, centre, right]; originX: win.beatX }
+        Card { id: card; ctl: win; islands: [left, centre, right] }
+        // Hyprland blurs this surface only while a card is out: it is full-screen and redraws with
+        // every music frame, and a standing blur re-blurred the whole screen each frame (~7 GPU
+        // points). Mirrors the islands_blur rule in hyprland.lua, which ships blur = false.
+        function blur(on) {
+            Quickshell.execDetached(["hyprctl", "eval", `hl.layer_rule({name="islands_blur", match={namespace="^islands$"}, blur=${on}, ignore_alpha=0.4, no_anim=true})`])
+        }
+        Connections { target: card; function onShownChanged() { win.blur(card.shown) } }
+        // the beatglow plugin keeps the window-border glow out from under the card (where it
+        // showed through and read as the bar's wave coming down the card from the wrong side):
+        // the box the card is heading for, a little wider for its necks, until it has closed. It
+        // reaches up to the screen edge: the glow's bloom rises above the window into the strip
+        // behind the islands, and the blur (on while a card is out) smeared that into the card
+        function mask() {
+            const s = scope.modelData, m = 6
+            Quickshell.execDetached(["hyprctl", "beatglow", "mask", s.name].concat(card.shown ? [
+                s.x + card.targetX - m, s.y, card.targetW + 2 * m, Look.top + Look.h + card.targetH + m, 20 + m].map(String) : []))
+        }
+        Connections {
+            target: card
+            function onShownChanged() { Qt.callLater(win.mask) }
+            function onTargetXChanged() { if (card.shown) Qt.callLater(win.mask) }
+            function onTargetWChanged() { if (card.shown) Qt.callLater(win.mask) }
+            function onTargetHChanged() { if (card.shown) Qt.callLater(win.mask) }
+        }
+        // each kick's wave, over everything (Wave.qml): a strip over the islands, and a box round
+        // the card below it while one is out (each draws only its own pixels: no overlap)
+        Wave { islands: [left, centre, right]; card: card; originX: win.beatX; width: bar.width; height: Look.top + Look.h + 4 }
+        Wave {
+            islands: [left, centre, right]; card: card; originX: win.beatX
+            on: card.shown
+            x: card.x - 48
+            y: Look.top + Look.h + 4
+            width: card.width + 96
+            height: Math.max(0, card.height - 2)
+        }
         HoverHandler {
             id: cardHover
             target: card

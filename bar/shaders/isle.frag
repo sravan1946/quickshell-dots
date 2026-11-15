@@ -1,12 +1,8 @@
 #version 440
-// Light in an island's glass (islands/Isle.qml), drawn between its surface and its contents.
-//  - Every island: each kick's wave (Visualizer's beat times, Settings' waveDur/waveReach) runs
-//    out from the music across the whole bar like a comet along the island's lower edge: a
-//    white-hot head blooming up off the floor, then a thin line in that kick's colour cooling
-//    towards the cover's second colour.
-//  - The island the music is in, under the media item (`eq`, x0..x1): an aurora curtain rising
-//    off the floor, its hem the spectrum (cava stereo: bass under the middle, treble at the
-//    ends), folds drifting and rays shimmering through it.
+// Light in the glass of the island the music is in (islands/Isle.qml), drawn between its
+// surface and its contents: under the media item (`eq`, x0..x1) an aurora curtain rising off
+// the floor, its hem the spectrum (cava stereo: bass under the middle, treble at the ends),
+// folds drifting and rays shimmering through it. (Each kick's wave is wave.frag's, over everything.)
 // Rebuild after editing: shaders/build.sh
 layout(location = 0) in vec2 qt_TexCoord0;
 layout(location = 0) out vec4 fragColor;
@@ -16,15 +12,7 @@ layout(std140, binding = 0) uniform buf {
     vec2 res;        // item size in px
     vec4 radii;      // corners: bottom-right, top-right, bottom-left, top-left
     float dpr;
-    float ox;        // px: where the waves start, in this island's coordinates
-    vec4 ages;       // the last four beats, newest in x: s since each
-    vec4 punches;    // their strengths, 0..1
-    float dur;       // the wave's run
-    float reach;
-    vec4 kr; vec4 kg; vec4 kb;   // each beat's colour, one channel per vec4
     vec2 eq;         // px: the media item's span (x1 <= x0: none here)
-    vec4 cut;        // px: the span the card hangs from (x..y), z how far it's out, w the reach of its
-                     // necks either side: no floor edge there, fading out across the necks
     float t;         // s, the frame clock (the folds and rays drift with it)
     float glow;      // 1 playing, 0 paused
     vec4 c1;         // the cover's vivid colour: the tops of the light, the played line
@@ -80,49 +68,13 @@ vec4 aurora(float u, float x, float up, float H) {
     vec3 c = mix(lo, mix(hi, c3.rgb, smoothstep(0.5, 1.0, y)), smoothstep(0.0, 0.45, y));
     return vec4(c * a, a);
 }
-// one beat's light at a point d px from the origin, as (flash, afterglow). The front leaves the
-// music fast and slows (an ease-out over `reach` px and `dur` s); as it passes, the point
-// flashes (the comet's head, ~45 ms), then keeps a fainter line that fades over ~0.2 s, dark
-// again before the next kick at most tempos.
-vec2 hit(float d, float age, float punch) {
-    float at = dur * (1.0 - pow(max(0.0, 1.0 - d / reach), 1.0 / 3.0));
-    float dt = age - at;
-    if (dt < -0.015) return vec2(0.0);
-    float on = smoothstep(-0.015, 0.0, dt);   // a soft leading edge, not a step
-    dt = max(dt, 0.0);
-    return punch * on * vec2(exp(-dt / 0.045), 0.3 * exp(-dt / 0.22));
-}
-
 void main() {
     vec2 px = qt_TexCoord0 * res;
     float sd = sdBox(px - res * 0.5, res * 0.5, radii);
     float inside = clamp(0.5 - sd * dpr, 0.0, 1.0);
     if (inside <= 0.0) { fragColor = vec4(0.0); return; }
     float up = res.y - px.y;                       // px above the floor
-    float low = smoothstep(res.y * 0.15, res.y, px.y);   // 0 at the top .. 1 at the floor
     vec4 col = vec4(0.0);                          // premultiplied
-
-    // ---- the beat waves, on the lower glass edge ----
-    float D = abs(px.x - ox);
-    vec2 h0 = hit(D, ages.x, punches.x), h1 = hit(D, ages.y, punches.y), h2 = hit(D, ages.z, punches.z), h3 = hit(D, ages.w, punches.w);
-    vec4 wt = vec4(h0.x + h0.y, h1.x + h1.y, h2.x + h2.y, h3.x + h3.y);
-    float sum = wt.x + wt.y + wt.z + wt.w;
-    float F = min(1.0, h0.x + h1.x + h2.x + h3.x);   // the heads passing here
-    float A = min(1.0, h0.y + h1.y + h2.y + h3.y);   // the lines they've left
-    // the head burns white; the line it leaves cools from the kick's colour towards the cover's second
-    vec3 kc = vec3(dot(wt, kr), dot(wt, kg), dot(wt, kb)) / max(sum, 1e-4);
-    vec3 lc = mix(kc, c2.rgb, 0.35 * A / (F + A + 1e-4));
-    lc = clamp(mix(vec3(dot(lc, vec3(0.299, 0.587, 0.114))), lc, 1.6), 0.0, 1.0);   // the cover's pastels go muddy dim on the glass: more colour
-    vec3 wc = mix(lc, vec3(1.0), 0.6 * F);
-    if (sum > 0.002) {
-        // under the card the floor is a seam inside the card's surface (goo.frag lights its outline)
-        float under = cut.z * smoothstep(cut.x - cut.w - 1.0, cut.x, px.x) * smoothstep(cut.y + cut.w + 1.0, cut.y, px.x)
-            * step(up, min(px.x, res.x - px.x));
-        float edge = exp(-pow((sd + 0.8) * dpr, 2.0) / 1.4) * (0.25 + 0.75 * low) * (1.0 - under);
-        float bloom = exp(-up / (2.5 + 5.0 * F)) * (1.0 - under);   // taller where the head is
-        float a = (min(1.0, 0.9 * F + A) * 0.75 * edge + (0.45 * F + 0.12 * A) * bloom) * 0.85;
-        col += vec4(wc * a, a);
-    }
 
     // ---- the music, under the media item ----
     float span = eq.y - eq.x;
