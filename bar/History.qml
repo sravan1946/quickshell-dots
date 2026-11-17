@@ -2,6 +2,7 @@ pragma Singleton
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import Quickshell.Services.Notifications
 
 // Every notification the daemon receives, newest first, kept across restarts.
 // ponytail: rewrites the whole file per change (Settings.historyMax small entries), fine until it isn't
@@ -26,9 +27,14 @@ Singleton {
     }
     function copy(text) { Quickshell.execDetached(["wl-copy", "--", text]) }
 
+    // key: stable across removals (the panel keys its rows on it); critical: drawn with a red edge;
+    // entry: the sender's desktop entry, for an icon when the notification brings none
+    property int seq: 0
     function add(n) {
+        const t = Date.now()
         model.insert(0, {
-            app: n.appName, summary: n.summary, body: n.body, time: Date.now(),
+            key: t + "-" + seq++, critical: n.urgency === NotificationUrgency.Critical, entry: n.desktopEntry,
+            app: n.appName, summary: n.summary, body: n.body, time: t,
             buttons: JSON.stringify(buttons(n.actions).map(a => a.text)),
             icon: n.appIcon !== "" ? Quickshell.iconPath(n.appIcon, true) : ""
         })
@@ -36,10 +42,12 @@ Singleton {
         save()
     }
     function remove(i) { model.remove(i); save() }
-    function removeApp(app) {
-        for (let i = model.count - 1; i >= 0; i--) if (model.get(i).app === app) model.remove(i)
+    function drop(pred) {
+        for (let i = model.count - 1; i >= 0; i--) if (pred(model.get(i))) model.remove(i)
         save()
     }
+    function removeKeys(keys) { drop(e => keys.includes(e.key)) }
+    function removeApp(app) { drop(e => e.app === app) }
     function clear() { model.clear(); save() }
 
     function save() {
@@ -53,7 +61,11 @@ Singleton {
         path: Quickshell.env("HOME") + "/.cache/quickshell-notifs.json"
         printErrors: false
         onLoaded: {
-            try { for (const e of JSON.parse(text()).reverse()) model.insert(0, Object.assign({ buttons: "[]" }, e)) } catch (e) {}
+            // entries from before keys/urgency were kept get them here
+            try {
+                JSON.parse(text()).reverse().forEach((e, i) => model.insert(0,
+                    Object.assign({ buttons: "[]", critical: false, entry: "", key: e.time + "-old" + i }, e)))
+            } catch (e) {}
         }
         // first run: no file yet
         onLoadFailed: {}
