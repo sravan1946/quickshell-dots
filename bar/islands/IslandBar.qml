@@ -42,7 +42,7 @@ Scope {
         WlrLayershell.namespace: "islands"
         // keyboard only while a card is open (the calendar's quick add, a Wi-Fi password), and
         // all of it while an authentication prompt is out, so typing goes straight in
-        WlrLayershell.keyboardFocus: win.authing ? WlrKeyboardFocus.Exclusive
+        WlrLayershell.keyboardFocus: win.authing || (card.open && card.key === "clips") ? WlrKeyboardFocus.Exclusive
             : card.open ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
 
         // a real fullscreen window covers the bar: stop drawing it
@@ -653,6 +653,18 @@ Scope {
                 if (card.open && card.key !== "clip") return
                 card.attach(win.hits.cal, "clip")
                 clipT.restart()
+            }
+        }
+        // SUPER+V (`qs -c bar ipc call clip toggle`): the history opens out of the same place,
+        // pinned like a tapped card, so a click anywhere else closes it
+        Connections {
+            target: ClipState
+            function onSummoned() {
+                if (Hyprland.focusedMonitor?.name !== scope.modelData.name || win.authing) return
+                if (card.open && card.key === "clips") { win.hide(); return }
+                card.attach(win.hits.cal, "clips")
+                leaveT.stop()
+                win.pinned = true
             }
         }
         Timer {

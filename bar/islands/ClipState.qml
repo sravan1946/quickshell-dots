@@ -10,6 +10,12 @@ Singleton {
     property string kind: ""
     property string text: ""
     signal copied()
+    signal summoned()    // SUPER+V: the history drops out of the clock on the focused monitor (panels/Clips.qml)
+
+    IpcHandler {
+        target: "clip"
+        function toggle(): void { root.summoned() }
+    }
 
     // CLIPBOARD_STATE: data, nil (emptied, e.g. its app quit) or sensitive (KeePassXC & co.)
     Process {
