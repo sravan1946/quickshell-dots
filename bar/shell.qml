@@ -65,6 +65,8 @@ ShellRoot {
     PowerMenu {}
     WallPicker {}
     ThemePicker {}
+    KeyHelp {}
+    Shot {}
 
     IpcHandler {
         target: "quick"
