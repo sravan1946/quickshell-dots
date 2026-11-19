@@ -11,6 +11,16 @@ Singleton {
     property real seen: Date.now()
     property int count: History.entries.count   // re-reads on every add/remove
     readonly property bool unread: count > 0 && (count, History.entries.get(0)?.time ?? 0) > seen
+    // anything unread that came in critical: the bell's dot goes red for it
+    readonly property bool urgent: {
+        count
+        for (let i = 0; i < History.entries.count; i++) {
+            const e = History.entries.get(i)
+            if (e.time <= seen) return false
+            if (e.critical) return true
+        }
+        return false
+    }
     function markRead() { seen = Date.now() }
 
     // the notifications dropping out of the bell (Settings.notifDrop), newest first. The

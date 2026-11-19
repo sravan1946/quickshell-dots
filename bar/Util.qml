@@ -22,6 +22,12 @@ Singleton {
     }
 
     // waybar getIcon(): index = value / (100 / n), clamped; icons are codepoints
+    // where sound goes or comes from, as a glyph: headphones, Bluetooth, a screen, effects, the mic, a speaker
+    function audioGlyph(n) {
+        const nm = n?.name ?? ""
+        return headphones(n) ? 0xF02CB : nm.startsWith("bluez") ? 0xF00B0 : /HDMI/.test(nm) ? 0xF0379
+            : /jamesdsp|jdsp|effect|filter/i.test(nm) ? 0xF0EA2 : nm.startsWith("alsa_input") || n?.isSink === false ? 0xF036C : 0xF04C3
+    }
     function pick(icons, pct) {
         const i = Math.floor(pct / Math.max(1, Math.floor(100 / icons.length)))
         return String.fromCodePoint(icons[Math.max(0, Math.min(icons.length - 1, i))])

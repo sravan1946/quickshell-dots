@@ -320,8 +320,33 @@ Scope {
                         padX: 7
                         Component.onCompleted: win.register(this)
                         onClicked: if (Cal.next?.meet) Qt.openUrlExternally(Cal.next.meet)
-                        Rectangle { width: 7; height: 7; radius: 3.5; color: Look.warm; anchors.verticalCenter: parent.verticalCenter }
-                        BT { text: meeting.label; color: Look.warm; font.weight: Font.DemiBold }
+                        // a ring while it's a way off, filled warm once it's close or on
+                        Rectangle {
+                            width: 6; height: 6; radius: 3
+                            anchors.verticalCenter: parent.verticalCenter
+                            color: meeting.near ? Look.warm : "transparent"
+                            border.width: meeting.near ? 0 : 1.5
+                            border.color: Look.accent
+                            Behavior on color { Fade {} }
+                        }
+                        // a fixed cell, so 5m → 30m → now never moves the clock
+                        BT {
+                            width: meetM.advanceWidth("00m")
+                            text: meeting.label
+                            color: meeting.near ? Look.warm : Look.dim
+                            font.weight: Font.DemiBold
+                            font.features: ({ tnum: 1 })
+                            Behavior on color { Fade {} }
+                            // on now: how far through it, a hairline under the minutes left
+                            Rectangle {
+                                visible: meeting.live
+                                anchors { bottom: parent.bottom; bottomMargin: 2 }
+                                width: parent.width; height: 2; radius: 1
+                                color: Qt.alpha(Look.text, 0.1)
+                                Rectangle { width: parent.width * meeting.through; height: 2; radius: 1; color: Look.warm }
+                            }
+                        }
+                        FontMetrics { id: meetM; font.family: Look.sans; font.pixelSize: Look.barText; font.weight: Font.DemiBold; font.features: ({ tnum: 1 }) }
                     }
                 }
             }
@@ -339,18 +364,31 @@ Scope {
                     onClicked: b => { if (b === Qt.LeftButton) win.toggle(this) }
                     G {
                         glyph: NetState.glyph
-                        // a VPN is up: a shield on the glyph's corner, so nothing moves
+                        color: NetState.online ? Qt.alpha(Look.text, 0.86) : Look.faint
+                        // a VPN is up: an accent dot on the glyph's corner (the panel's "up" chip),
+                        // cut out of the glyph by a ring of the surface, so nothing moves
                         Rectangle {
-                            visible: NetState.vpn
                             x: parent.width - 6
-                            y: parent.height / 2 - 1
-                            width: 10; height: 10; radius: 5
-                            color: Look.surface
-                            G { anchors.centerIn: parent; height: 10; glyph: 0xF0565; color: Look.good; font.pixelSize: 9 }
+                            y: parent.height / 2 + 1
+                            width: NetState.vpn ? 9 : 0; height: width; radius: width / 2
+                            color: Qt.rgba(Look.surface.r, Look.surface.g, Look.surface.b, 1)
+                            Behavior on width { Anim { type: "fast" } }
+                            Rectangle { anchors.centerIn: parent; width: Math.max(0, parent.width - 3); height: width; radius: width / 2; color: Look.accent }
                         }
                     }
-                    BT { width: rateM.advanceWidth("↓000k"); text: "↓" + NetState.short(NetStats.down); color: Look.down }
-                    BT { width: rateM.advanceWidth("↑000k"); text: "↑" + NetState.short(NetStats.up); color: Look.up }
+                    // only the direction that's moving lights up; offline says so in the same room
+                    BT {
+                        width: rateM.advanceWidth("↓000k")
+                        text: NetState.online ? "↓" + NetState.short(NetStats.down) : "offline"
+                        color: NetState.online && NetStats.down >= 1000 ? Look.down : Look.faint
+                        Behavior on color { Fade {} }
+                    }
+                    BT {
+                        width: rateM.advanceWidth("↑000k")
+                        text: NetState.online ? "↑" + NetState.short(NetStats.up) : ""
+                        color: NetStats.up >= 1000 ? Look.up : Look.faint
+                        Behavior on color { Fade {} }
+                    }
                     FontMetrics { id: rateM; font.family: Look.sans; font.pixelSize: Look.barText; font.features: ({ tnum: 1 }) }
                 }
                 Slot {
@@ -384,7 +422,10 @@ Scope {
                     // the lower bud for Nothing / CMF buds (BudsState), else what BlueZ says; -1: unknown
                     readonly property int batt: {
                         const l = BudsState.of(dev)
-                        const b = l ? [l.left, l.right].filter(x => x).map(x => x[0]) : []
+                        // the buds in use; one charging in the case doesn't count while the other's out
+                        const all = l ? [l.left, l.right].filter(x => x) : []
+                        const out = all.filter(x => !x[1])
+                        const b = (out.length ? out : all).map(x => x[0])
                         return b.length ? Math.min(...b) : dev?.batteryAvailable ? Math.round(dev.battery * 100) : -1
                     }
                     onClicked: b => { if (b === Qt.MiddleButton && a) a.enabled = !a.enabled }
@@ -392,22 +433,50 @@ Scope {
                     // charge, not as another of the bar's numbers, and costs no width (the exact
                     // figure is in the menu)
                     Item {
+                        id: btBox
                         readonly property bool ringed: bt.on && bt.batt >= 0
-                        width: ringed ? 20 : btG.width
+                        // Nothing / CMF buds: a capsule each side of the glyph, one per bud (the panel's)
+                        readonly property var buds: bt.earbuds ? BudsState.of(bt.dev) : null
+                        // a bud in use: reported and out of the case. One in your ear and the other
+                        // charging in the case: only the one in use shows (both charging: both)
+                        readonly property var worn: !buds ? [] : [buds.left, buds.right].map((u, i, all) =>
+                            u && !(u[1] && all[1 - i] && !all[1 - i][1]) ? u : null)
+                        readonly property bool pair: bt.on && !!buds && worn.some(u => u)
+                        width: pair ? 26 : ringed ? 20 : btG.width
                         height: Look.item
                         G {
                             id: btG
                             anchors.centerIn: parent
-                            font.pixelSize: parent.ringed ? 10 : 13
+                            font.pixelSize: parent.pair ? 12 : parent.ringed ? 10 : 13
                             glyph: !bt.on ? 0xF00AF : bt.earbuds ? 0xF184F : /headset|headphone/.test(bt.dev.icon) ? 0xF02CB
                                 : /audio|speaker/.test(bt.dev.icon) ? 0xF04C3 : /mouse/.test(bt.dev.icon) ? 0xF037D
                                 : /keyboard/.test(bt.dev.icon) ? 0xF030C : /phone/.test(bt.dev.icon) ? 0xF011C : 0xF00B1
                             color: bt.on ? Look.accentInk : bt.a?.enabled ? Look.dim : Look.faint
                             Behavior on color { Fade {} }
                         }
+                        Repeater {
+                            model: btBox.pair ? btBox.worn : []
+                            Rectangle {
+                                required property var modelData
+                                required property int index
+                                visible: !!modelData
+                                x: index ? btBox.width - width : 0
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 4; height: 12; radius: 2
+                                color: Qt.alpha(Look.accentInk, 0.22)
+                                Rectangle {
+                                    anchors.bottom: parent.bottom
+                                    width: parent.width
+                                    height: modelData ? Math.max(2, parent.height * modelData[0] / 100) : 0
+                                    radius: 2
+                                    color: modelData && modelData[0] <= 15 ? Look.alert : Look.accentInk
+                                    Behavior on height { Anim { type: "effects" } }
+                                }
+                            }
+                        }
                         Shape {
                             anchors.fill: parent
-                            visible: parent.ringed
+                            visible: parent.ringed && !parent.pair
                             preferredRendererType: Shape.CurveRenderer
                             ShapePath {
                                 strokeColor: Qt.alpha(Look.accentInk, 0.22)
@@ -452,15 +521,15 @@ Scope {
                     spacing: 2
                     Component.onCompleted: win.register(this)
                     // the laptop's own: a cell that fills with the charge, its number inside, so it
-                    // can't be mistaken for any other reading; a bolt ahead of it while charging
-                    G { visible: BatState.charging; glyph: 0xF140B; color: Look.good; font.pixelSize: 11 }
+                    // can't be mistaken for any other reading. Plugged in, the nub becomes a bolt:
+                    // the item is the same width either way
                     Item {
-                        width: 29; height: Look.item
+                        width: 33; height: Look.item
                         // a soft track with a solid fill (the volume meter's language); the number
                         // is light over the empty part and dark over the fill, split where it ends
                         Item {
                             id: cell
-                            width: 26; height: 14
+                            width: 24; height: 14
                             anchors.verticalCenter: parent.verticalCenter
                             Rectangle { anchors.fill: parent; radius: 4; color: Qt.alpha(Look.text, 0.16) }
                             T { id: capN; anchors.centerIn: parent; text: BatState.cap; font.pixelSize: 9; font.weight: Font.Bold }
@@ -470,11 +539,30 @@ Scope {
                                 Rectangle { width: cell.width; height: cell.height; radius: 4; color: BatState.colour }
                                 T { x: capN.x; y: capN.y; text: capN.text; font: capN.font; color: Qt.rgba(0, 0, 0, 0.78) }
                             }
+                            // charging up to a limit: where it'll stop (the panel's dashed line)
+                            Rectangle {
+                                visible: BatState.charging && BatState.limit < 100
+                                x: Math.round(cell.width * BatState.limit / 100)
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 1; height: 8
+                                color: Qt.rgba(0, 0, 0, 0.45)
+                            }
                         }
                         Rectangle {
                             x: cell.width + 1; width: 2; height: 6; radius: 1
                             anchors.verticalCenter: parent.verticalCenter
                             color: Qt.alpha(Look.text, 0.16)
+                            opacity: BatState.charging ? 0 : 1
+                            Behavior on opacity { Anim { type: "effects" } }
+                        }
+                        G {
+                            x: cell.width
+                            anchors.verticalCenter: parent.verticalCenter
+                            glyph: 0xF140B
+                            color: Look.good
+                            font.pixelSize: 10
+                            opacity: BatState.charging ? 1 : 0
+                            Behavior on opacity { Anim { type: "effects" } }
                         }
                     }
                 }
@@ -483,7 +571,8 @@ Scope {
                     padX: 4
                     Component.onCompleted: win.register(this)
                     onScrolled: s => Brightness.step(s)
-                    G { glyph: 0xF00DF }
+                    // warm means light (the panel's track); the sun steps with the level
+                    G { glyph: Brightness.pct < 34 ? 0xF00DE : Brightness.pct < 67 ? 0xF00DF : 0xF00E0; color: Qt.alpha(Look.warm, 0.95) }
                 }
                 Hit {
                     id: vol
@@ -518,7 +607,11 @@ Scope {
                         if (b === Qt.MiddleButton && sink?.audio) Util.setMuted(sink, !sink.audio.muted)
                         else if (b === Qt.RightButton) Util.run("pavucontrol-qt -t 3 || pavucontrol -t 3")
                     }
-                    G { glyph: vol.sink?.audio?.muted ? 0xF0581 : Util.headphones(vol.sink) ? 0xF02CB : vol.vol < 34 ? 0xF057F : 0xF057E }
+                    // the glyph says where it goes (the meter says how loud)
+                    G {
+                        glyph: vol.sink?.audio?.muted ? 0xF0581 : Util.audioGlyph(vol.sink)
+                        color: vol.sink?.audio?.muted ? Look.faint : Qt.alpha(Look.text, 0.86)
+                    }
                     // the level as a short meter (amber past 100%); the exact number drops out of
                     // the icon while it changes (panels/Level.qml)
                     Rectangle {
@@ -530,7 +623,8 @@ Scope {
                             width: Math.max(height, parent.width * Math.min(1, vol.vol / 100))
                             visible: vol.vol > 0
                             height: parent.height; radius: 2
-                            color: vol.vol > 100 ? Look.urgent : Qt.alpha(Look.text, 0.86)
+                            color: vol.sink?.audio?.muted ? Look.faint : vol.vol > 100 ? Look.urgent : Look.accent
+                            Behavior on width { enabled: !walk.running; Anim { type: "effects" } }
                         }
                     }
                 }
@@ -541,14 +635,23 @@ Scope {
                     padX: 4
                     Component.onCompleted: win.register(this)
                     onClicked: b => { if (b === Qt.RightButton) Config.dnd = !Config.dnd }
-                    G { glyph: Config.dnd ? 0xF009B : 0xF009A }
-                    // unread: anything logged since the panel was last open
+                    G { glyph: Config.dnd ? 0xF009B : 0xF009A; color: Config.dnd ? Look.faint : Qt.alpha(Look.text, 0.86) }
+                    // unread (anything logged since the panel was last open): an accent dot, red
+                    // when one came in critical; under do-not-disturb a hollow ring, waiting
                     Rectangle {
                         parent: bell
-                        visible: !Config.dnd && NoteState.unread
-                        x: bell.width - 10; y: 3
-                        width: 6; height: 6; radius: 3
-                        color: Look.alert
+                        x: bell.width - 11; y: 2
+                        width: NoteState.unread ? 9 : 0; height: width; radius: width / 2
+                        color: Qt.rgba(Look.surface.r, Look.surface.g, Look.surface.b, 1)
+                        Behavior on width { Anim { type: "fast" } }
+                        Rectangle {
+                            anchors.centerIn: parent
+                            width: Math.max(0, parent.width - 3); height: width; radius: width / 2
+                            color: Config.dnd ? "transparent" : NoteState.urgent ? Look.alert : Look.accent
+                            border.width: Config.dnd ? 1.5 : 0
+                            border.color: Look.dim
+                            Behavior on color { Fade {} }
+                        }
                     }
                 }
                 // quick settings: session, night light, airplane mode, mic, phone
@@ -723,7 +826,13 @@ Scope {
             readonly property var e: Cal.next
             readonly property real mins: e ? (new Date(e.start) - clock.date) / 60000 : 1e9
             readonly property bool soon: !!e && mins <= 30 && new Date(e.end) > clock.date
-            readonly property string label: mins <= 0 ? "now" : Math.ceil(mins) + "m"
+            readonly property bool live: !!e && mins <= 0
+            readonly property bool near: live || mins <= Settings.meetLead
+            readonly property real remain: e ? (new Date(e.end) - clock.date) / 60000 : 0
+            readonly property real through: e ? Math.min(1, Math.max(0, -mins / Math.max(1, (new Date(e.end) - new Date(e.start)) / 60000))) : 0
+            // before: minutes to it; on: "now" for its first minute, then minutes left
+            readonly property string label: !live ? Math.ceil(mins) + "m" : mins > -1 ? "now"
+                : remain < 60 ? Math.ceil(remain) + "m" : Math.floor(remain / 60) + "h"
         }
 
         IpcHandler {

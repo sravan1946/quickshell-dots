@@ -29,6 +29,23 @@ Panel {
     property int total: 0
     property int fresh: 0            // unread
     property string hint: ""         // what the pointer is on, in the subtitle
+    // clear all (or one app): the rows sweep out one after another, then they're gone
+    property bool clearing: false
+    function clearOut() {
+        if (clearing || total === 0) return
+        hint = ""
+        clearing = true
+        sweep.start()
+    }
+    Timer {
+        id: sweep
+        interval: Math.min(list.count, 10) * 24 * Look.speed + Look.ms("exit")
+        onTriggered: {
+            const app = p.filter
+            p.clearing = false
+            app ? History.removeApp(app) : History.clear()
+        }
+    }
     onFilterChanged: rebuild()
     onExpandedChanged: rebuild()
     Connections { target: History.entries; function onCountChanged() { p.hint = ""; p.rebuild(); NoteState.markRead() } }
@@ -65,10 +82,19 @@ Panel {
         })
         // the rail stops at each day's last row
         out.forEach((x, i) => x.dayLast = x.kind !== "day" && (i === out.length - 1 || out[i + 1].kind === "day"))
-        rows = out
-        apps = order
+        rows = keep(rows, out, x => x.key)
+        apps = keep(apps, order, x => x.app)
         total = History.entries.count
         p.fresh = fresh
+    }
+
+    // the models match rows by key and by identity: a row that didn't change keeps the very
+    // same object, so only what was removed, added or changed touches its delegate. (By value,
+    // ScriptModel matched by position: one dismissal re-rendered every row under it.)
+    function keep(old, fresh, id) {
+        const was = {}
+        old.forEach(x => was[id(x)] = x)
+        return fresh.map(x => { const o = was[id(x)]; return o && JSON.stringify(o) === JSON.stringify(x) ? o : x })
     }
 
     property real now: Date.now()
@@ -151,7 +177,7 @@ Panel {
                 tone: Look.alert
                 opacity: p.total > 0 ? 1 : 0.3
                 enabled: p.total > 0
-                onClicked: { p.hint = ""; p.filter ? History.removeApp(p.filter) : History.clear() }
+                onClicked: p.clearOut()
             }
         }
     }
@@ -236,9 +262,12 @@ Panel {
         Row {
             id: dots
             spacing: 8
+            // an app's last one went: the icons after it slide over; a new app's fades in
+            move: Transition { Anim { property: "x"; type: "spatial" } }
+            add: Transition { Anim { property: "opacity"; from: 0; to: 1; type: "effects" } }
             AppDot { app: "Everything"; glyph: 0xF003B; count: p.total; unread: p.fresh > 0 }
             Repeater {
-                model: p.apps
+                model: ScriptModel { values: p.apps; objectProp: "app"; comparisonMode: ObjectComparison.Identity }
                 AppDot {
                     required property var modelData
                     app: modelData.app || "Unknown"
@@ -267,17 +296,21 @@ Panel {
         width: parent.width
         height: Math.min(contentHeight, 470)
         visible: p.rows.length > 0
-        clip: true
+        // clipped only when it scrolls: otherwise the rows gliding up after a dismiss would be
+        // cut at the list's new (already shorter) edge while the card is still shrinking to it
+        clip: interactive
         interactive: contentHeight > height
         boundsBehavior: Flickable.StopAtBounds
-        model: ScriptModel { values: p.rows }
-        add: Transition { Anim { property: "opacity"; from: 0; to: 1; type: "effects" } }
-        remove: Transition {
-            ParallelAnimation {
-                Anim { property: "opacity"; to: 0; type: "exit" }
-                Anim { property: "x"; to: 60; type: "exit" }
+        model: ScriptModel { values: p.rows; objectProp: "key"; comparisonMode: ObjectComparison.Identity }
+        // a row that arrives (one a dismissal reveals): in once the others have made room
+        add: Transition {
+            SequentialAnimation {
+                PropertyAction { property: "opacity"; value: 0 }
+                PauseAnimation { duration: Look.ms("spatial") * 0.4 }
+                Anim { property: "opacity"; to: 1; type: "effects" }
             }
         }
+        // no remove transition: a dismissed row has already slid out
         displaced: Transition {
             Anim { property: "y"; type: "spatial" }
             Anim { property: "opacity"; to: 1; type: "effects" }
@@ -307,20 +340,48 @@ Panel {
             width: ListView.view.width
             height: ld.item?.height ?? 0
 
+            // dismissing one: the whole row (time, node, card) slides off and fades, then it's
+            // removed in one step. The list does the rest at once: the rows under it glide up
+            // (displaced: a row that changed, say became its run's first, glides to its new
+            // size too), a row it reveals fades in, and the card shrinks once with them
+            function dismiss() { if (!goneAnim.running) goneAnim.start() }
+            SequentialAnimation {
+                id: goneAnim
+                Anim { target: del; property: "leaving"; to: 1; type: "exit" }
+                ScriptAction { script: History.removeKeys(del.d.kind === "note" ? [del.d.key] : del.d.keys) }
+            }
+
+
             // the first rows arrive one after another as the panel opens
             property real enter: p.intro && index < 12 ? 0 : 1
             Component.onCompleted: if (enter < 1) introAnim.start()
+            // clearing: out to the right, top row first
+            property real leaving: 0
+            Connections {
+                target: p
+                function onClearingChanged() {
+                    if (p.clearing) { outAnim.delay = Math.min(Math.max(0, del.index - list.indexAt(0, list.contentY)), 10) * 24 * Look.speed; outAnim.start() }
+                    else if (del.leaving > 0) { outAnim.stop(); backAnim.start() }
+                }
+            }
+            SequentialAnimation {
+                id: outAnim
+                property real delay: 0
+                PauseAnimation { duration: outAnim.delay }
+                Anim { target: del; property: "leaving"; to: 1; type: "exit" }
+            }
+            Anim { id: backAnim; target: del; property: "leaving"; to: 0; type: "enter" }
             SequentialAnimation {
                 id: introAnim
-                PauseAnimation { duration: del.index * 28 * Look.speed }
+                PauseAnimation { duration: Math.max(0, del.index) * 28 * Look.speed }
                 Anim { target: del; property: "enter"; to: 1; type: "enter" }
             }
 
             Loader {
                 id: ld
                 width: parent.width
-                opacity: del.enter
-                transform: Translate { y: (1 - del.enter) * 10 }
+                opacity: del.enter * (1 - del.leaving)
+                transform: Translate { x: del.leaving * 70; y: (1 - del.enter) * 10 }
                 sourceComponent: del.d.kind === "day" ? dayRow : del.d.kind === "more" ? moreRow : noteRow
             }
 
@@ -380,7 +441,7 @@ Panel {
                         color: ch.hovered ? Look.alert : Look.faint
                         font.pixelSize: Look.small
                         HoverHandler { id: ch; cursorShape: Qt.PointingHandCursor }
-                        TapHandler { onTapped: History.removeKeys(del.d.keys) }
+                        TapHandler { onTapped: del.dismiss() }
                     }
                 }
             }
@@ -558,7 +619,7 @@ Panel {
                                     HoverHandler { id: bh; cursorShape: Qt.PointingHandCursor }
                                     TapHandler {
                                         onTapped: {
-                                            if (parent.modelData.kind === "close") return History.removeKeys([row.e.key])
+                                            if (parent.modelData.kind === "close") return del.dismiss()
                                             History.copy([row.e.summary, p.plain(row.e.body)].filter(s => s).join("\n"))
                                             row.copied = true
                                         }
@@ -579,7 +640,7 @@ Panel {
                             yAxis.enabled: false
                             xAxis.minimum: 0
                             onActiveChanged: if (!active) {
-                                if (slide.x > slide.width / 4 || centroid.velocity.x > 700) History.removeKeys([row.e.key])
+                                if (slide.x > slide.width / 4 || centroid.velocity.x > 700) del.dismiss()
                                 else back.start()
                             }
                         }
@@ -592,8 +653,19 @@ Panel {
 
     // ---- nothing ----
     Column {
+        id: empty
         visible: p.rows.length === 0
         width: parent.width
+        // it arrives (after a clear, too): fades and rises in
+        opacity: 0
+        onVisibleChanged: if (visible) emptyIn.restart()
+        Component.onCompleted: if (visible) emptyIn.restart()
+        transform: Translate { id: emptyRise }
+        ParallelAnimation {
+            id: emptyIn
+            Anim { target: empty; property: "opacity"; from: 0; to: 1; type: "enter" }
+            Anim { target: emptyRise; property: "y"; from: 8; to: 0; type: "enter" }
+        }
         topPadding: 22
         bottomPadding: 22
         spacing: 8
