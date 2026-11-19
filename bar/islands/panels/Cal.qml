@@ -9,7 +9,6 @@ import qs.islands
 // Right, the picked day: all-day events as chips, then for today a card for what's on now or
 // next (countdown, how far through, Join), then the rest of the day in order (past ones faded),
 // then a look at the day after. Tap an event to open it in Google Calendar. Events: Cal.qml.
-// (Earlier designs are kept in designs/.)
 Panel {
     id: p
     readonly property int cell: 40
