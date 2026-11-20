@@ -36,7 +36,10 @@ Singleton {
             key: t + "-" + seq++, critical: n.urgency === NotificationUrgency.Critical, entry: n.desktopEntry,
             app: n.appName, summary: n.summary, body: n.body, time: t,
             buttons: JSON.stringify(buttons(n.actions).map(a => a.text)),
-            icon: n.appIcon !== "" ? Quickshell.iconPath(n.appIcon, true) : ""
+            // icon-provider images (notify-send -i /path arrives as image://icon//path) survive the save;
+            // raw image-data urls do not
+            icon: n.image.startsWith("image://icon/") ? n.image
+                : n.appIcon !== "" ? Quickshell.iconPath(n.appIcon, true) : ""
         })
         while (model.count > max) model.remove(model.count - 1)
         save()
