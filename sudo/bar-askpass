@@ -1,18 +1,43 @@
 #!/bin/bash
-# SUDO_ASKPASS: the password goes into the island bar's auth card (bar/islands/AuthState.qml)
-# instead of a separate dialog. The bar answers through a fifo: "P<password>" or "C" (cancelled).
-# Falls back to rofi-askpass when the bar isn't running.
-rofi=~/.local/bin/rofi-askpass
+# SUDO_ASKPASS and SSH_ASKPASS: the question goes into the island bar's auth card
+# (bar/islands/AuthState.qml) instead of a separate dialog, with who's asking: the command
+# (for ssh run by git, the git command you typed and the remote), where, and ssh's own prompt
+# (which key, or the host-key question). The bar answers through a fifo: "P<text>" or "C".
+#
+# ssh modes (SSH_ASKPASS_PROMPT): unset = a passphrase, or a visible answer for a yes/no question;
+# "confirm" = just OK or Cancel (prints nothing); "none" = a notice, shown as a notification.
 bar=$(systemctl --user show -p MainPID --value quickshell-bar 2>/dev/null)
-[[ $bar && $bar != 0 ]] || exec "$rofi" "$@"
+[[ $bar && $bar != 0 ]] || { echo "bar-askpass: the bar isn't running" >&2; exit 1; }
+
+prompt=${1:-Password:}
+if [[ $SSH_ASKPASS_PROMPT == none ]]; then
+  notify-send -a ssh -i dialog-password "ssh" "$prompt"
+  exit 0
+fi
+mode=secret
+[[ $SSH_ASKPASS_PROMPT == confirm ]] && mode=confirm
+[[ $prompt == *"(yes/no"* ]] && mode=text
+
+# who's asking: ssh run by git says "ssh host git-upload-pack 'repo'"; show the outermost git
+# (what was typed) and "host:repo"
+pid=$PPID remote=""
+if [[ $(cat /proc/$pid/comm 2>/dev/null) == ssh ]]; then
+  remote=$(tr '\0' ' ' < /proc/$pid/cmdline | sed -nE "s/.* ([^ ]+) git-[a-z-]+-pack '([^']+)'.*/\1:\2/p")
+  p=$pid
+  while p=$(awk '/^PPid:/{print $2}' /proc/$p/status 2>/dev/null) && (( ${p:-0} > 1 )); do
+    [[ $(cat /proc/$p/comm) == git* ]] && pid=$p || break
+  done
+fi
+cmd=$(tr '\0' ' ' < /proc/$pid/cmdline 2>/dev/null | sed 's/ *$//')
+cwd=$(readlink /proc/$pid/cwd)
+
 fifo=$(mktemp -u "${XDG_RUNTIME_DIR:-/tmp}/askpass.XXXXXX")
-mkfifo -m600 "$fifo" || exec "$rofi" "$@"
+mkfifo -m600 "$fifo" || exit 1
 exec 3<>"$fifo"   # read-write: opening never blocks, whichever side comes first
-cmd=$(tr '\0' ' ' < /proc/$PPID/cmdline)
-if ! qs ipc --pid "$bar" call auth ask "$fifo" "$PPID" "$cmd" "$PWD" >/dev/null 2>&1; then
-  exec 3<&-; rm -f "$fifo"; exec "$rofi" "$@"
+if ! qs ipc --pid "$bar" call auth ask "$fifo" "$PPID" "$cmd" "${cwd:-$PWD}" "$prompt" "$remote" "$mode" >/dev/null 2>&1; then
+  exec 3<&-; rm -f "$fifo"; exit 1
 fi
 IFS= read -r -t 300 line <&3; ok=$?
 exec 3<&-; rm -f "$fifo"
 [[ $ok == 0 && $line == P* ]] || exit 1
-printf '%s\n' "${line#P}"
+[[ $mode == confirm ]] || printf '%s\n' "${line#P}"

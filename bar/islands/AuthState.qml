@@ -18,7 +18,10 @@ import Quickshell.Services.Polkit
 // sudo shows in the same card, without polkit: /etc/pam.d/sudo runs sudo-bar-hook (in
 // ../sudo/) around pam_fprintd, which calls sudo() with where it is (finger, pass, ok), and
 // SUDO_ASKPASS=bar-askpass calls ask() and waits on a fifo for what's typed here. The stage is
-// driven through `preview` (no AuthFlow); `sudo` says it's real.
+// driven through `preview` (no AuthFlow); `sudo` says it's real. SSH_ASKPASS is bar-askpass too:
+// the same card, for ssh's passphrase or its yes/no questions, with the git command and remote
+// that set it off. Only sudo has a PAM hook to say how it went; for ssh the card goes on answer,
+// and comes back with "didn't work" if ssh asks again.
 Singleton {
     id: s
     readonly property AuthFlow flow: agent.flow
@@ -45,6 +48,18 @@ Singleton {
     property string fifo: ""           // the askpass waiting for an answer ("" if none is)
     property bool cancelled: false
     property bool answered: false      // a password went back: another ask() means it was wrong
+    property string prompt: ""         // what the askpass was asked ("[sudo] password for …:", ssh's)
+    property string remote: ""         // host:repo, for ssh run by git
+    property string mode: "secret"     // secret, text (a visible answer) or confirm (OK/Cancel)
+    property string cwd: ""            // where the command runs, ~ for home
+    readonly property bool hooked: app === "sudo"   // sudo-bar-hook reports the outcome
+    // the prompt as a heading: "Passphrase for ~/.ssh/id_ed25519", "Password for sravan"
+    readonly property string ask: {
+        const home = Quickshell.env("HOME")
+        const t = prompt.replace(/^\[sudo\]\s*/, "").replace(/^Enter\s+/i, "")
+            .replace(/key '([^']+)'/, (m, k) => k.replace(home, "~")).replace(/[:\s]+$/, "")
+        return t.charAt(0).toUpperCase() + t.slice(1)
+    }
 
     PolkitAgent {
         id: agent
@@ -80,7 +95,13 @@ Singleton {
     Timer { id: doneT; interval: 650; onTriggered: if (!agent.isActive) { s.showing = false; s.preview = ""; s.sudo = false } }
 
     function submit(v) {
-        if (sudo) { if (fifo) { reply("P" + v); answered = true; preview = "wait" } return }
+        if (sudo) {
+            if (!fifo) return
+            reply("P" + v); answered = true
+            if (hooked) preview = "wait"
+            else { preview = ""; showing = false; sudo = false }
+            return
+        }
         if (!preview) { flow?.submit(v); return }
         if (v === "") { preview = "error"; fails++ } else { preview = "ok"; ok = true; doneT.restart() }
     }
@@ -105,16 +126,17 @@ Singleton {
 
     // ---- sudo (sudo-bar-hook and bar-askpass) ----
     function sudoStart(pid, cmd, cwd) {
+        const here = cwd ? cwd.replace(new RegExp("^" + Quickshell.env("HOME")), "~") : ""
         if (sudo && pid === sudoPid) {   // the hook can't always read sudo's cwd; the askpass can
-            if (!action && cwd) action = "in " + cwd.replace(new RegExp("^" + Quickshell.env("HOME")), "~")
+            if (!s.cwd && here) s.cwd = here
             return
         }
         doneT.stop()
         sudo = true; sudoPid = pid; fifo = ""; cancelled = false; answered = false
         ok = false; fails = 0; skipping = false; preferPass = false; typed = ""
-        app = "sudo"; pkg = ""; found = false; icon = ""
-        message = cmd.replace(/^\S*sudo(\s+-\S+)*\s+/, "").trim() || "Run a command as root"
-        action = cwd ? "in " + cwd.replace(new RegExp("^" + Quickshell.env("HOME")), "~") : ""
+        app = (cmd.split(" ")[0] || "sudo").split("/").pop(); pkg = ""; found = false; icon = ""
+        message = cmd.replace(/^\S*sudo(\s+-\S+)*\s+/, "").trim()
+        action = ""; s.cwd = here; prompt = ""; remote = ""; mode = "secret"
         showing = true
     }
     // the answer goes in the environment, not argv: /proc/*/environ is yours alone
@@ -180,14 +202,16 @@ Singleton {
             else if (stage === "ok") { s.ok = true; s.preview = "ok"; doneT.restart() }
         }
         // from bar-askpass: answer into `fifo`
-        function ask(fifo: string, pid: int, cmd: string, cwd: string): void {
+        function ask(fifo: string, pid: int, cmd: string, cwd: string, prompt: string, remote: string, mode: string): void {
             if (s.flow) { Quickshell.execDetached(["sh", "-c", 'echo C > "$1"', "sh", fifo]); return }
-            const again = s.sudo && pid === s.sudoPid
+            // the same process asking again after an answer went back: that answer was wrong
+            const wrong = pid === s.sudoPid && s.answered, missed = s.fails
             ttyT.stop()   // the askpass came: not a terminal sudo after all
             s.sudoStart(pid, cmd, cwd)
+            s.prompt = prompt; s.remote = remote; s.mode = mode || "secret"
             s.fifo = fifo
             if (s.cancelled) { s.reply("C"); return }
-            if (again && s.answered) { s.fails++; s.preview = "error" }
+            if (wrong) { s.fails = missed + 1; s.preview = "error" }
             else s.preview = "pass"
             s.skipping = false
         }

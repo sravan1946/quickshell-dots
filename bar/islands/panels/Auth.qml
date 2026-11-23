@@ -9,13 +9,19 @@ import qs.islands
 // wants: a ring waiting for a finger, a password box once a password is asked for, green when
 // it's through. The body keeps one height through every stage, so the card never resizes
 // mid-conversation. Esc cancels.
+// sudo and ssh (bar-askpass) get a wider card that shows everything: the prompt as the heading
+// (which key, whose password), the remote and folder, and the whole command in a code block.
+// ssh's yes/no questions (an unknown host) are shown in full with a visible answer box; a
+// "confirm" from ssh is just OK / Cancel.
 Panel {
     id: p
-    implicitWidth: 300
+    implicitWidth: AuthState.sudo ? 400 : 300
     spacing: 14
     focus: true
     Component.onCompleted: forceActiveFocus()
     Keys.onEscapePressed: AuthState.cancel()
+    // ssh's "confirm": no box, Enter is OK
+    Keys.onReturnPressed: if (p.asks && AuthState.mode === "confirm") AuthState.submit("")
     // typing while it waits for a finger: skip the finger, the letters go into the password box
     Keys.onPressed: e => {
         if ((stage === "finger" || stage === "wait") && e.text.length && e.text.charCodeAt(0) >= 32) {
@@ -29,6 +35,8 @@ Panel {
     readonly property string said: pv === "error" ? "Sorry, that didn't work" : flow?.supplementaryMessage ?? ""
     readonly property bool error: pv === "error" || (!!flow?.supplementaryIsError && said !== "")
     readonly property bool finger: pv === "finger" || /finger|swipe|touch/i.test(said)
+    readonly property bool asks: AuthState.sudo                       // sudo / ssh, not polkit
+    readonly property bool question: asks && AuthState.mode !== "secret" // ssh's yes/no or confirm
     readonly property string stage: AuthState.ok ? "ok"
         : pv === "pass" || pv === "error" || flow?.isResponseRequired ? "pass"
         : finger ? "finger" : "wait"
@@ -40,7 +48,7 @@ Panel {
     onStageChanged: if (stage === "pass") {
         field.text = AuthState.typed + field.text
         AuthState.typed = ""
-        Qt.callLater(field.grab)
+        if (!(p.asks && AuthState.mode === "confirm")) Qt.callLater(field.grab)
     }
 
     // a miss shakes what was being used (the ring or the box)
@@ -77,7 +85,8 @@ Panel {
             G {
                 anchors.centerIn: parent
                 visible: !appIcon.visible
-                glyph: 0xF099D
+                glyph: !p.asks || AuthState.app === "sudo" ? 0xF099D
+                    : AuthState.app.startsWith("git") ? 0xF02A2 : 0xF0306
                 color: Look.accent
                 font.pixelSize: 17
             }
@@ -89,13 +98,16 @@ Panel {
             T {
                 width: parent.width
                 text: (AuthState.app ? AuthState.app + " asks" : "Authentication required")
+                    + (p.asks && AuthState.remote && AuthState.app !== "ssh" ? "  ·  through ssh" : "")
                 color: Look.faint
                 font.pixelSize: Look.small
                 elide: Text.ElideRight
             }
             T {
                 width: parent.width
-                text: AuthState.message
+                text: !p.asks ? AuthState.message
+                    : p.question ? (AuthState.mode === "confirm" ? "Confirm" : "ssh has a question")
+                    : AuthState.ask || (AuthState.app === "sudo" ? "Run as root" : "Password")
                 font.weight: Font.DemiBold
                 wrapMode: Text.Wrap
                 maximumLineCount: 2
@@ -106,8 +118,9 @@ Panel {
             T {
                 width: parent.width
                 topPadding: 2
-                text: AuthState.action + (!AuthState.found ? "" : "  ·  " + (AuthState.pkg ? AuthState.pkg + " package" : "policy from no package"))
-                visible: AuthState.action !== ""
+                text: p.asks ? [AuthState.remote, AuthState.cwd && "in " + AuthState.cwd].filter(x => x).join("  ·  ")
+                    : AuthState.action + (!AuthState.found ? "" : "  ·  " + (AuthState.pkg ? AuthState.pkg + " package" : "policy from no package"))
+                visible: text !== ""
                 color: Look.faint
                 font.pixelSize: 10
                 wrapMode: Text.Wrap
@@ -115,10 +128,46 @@ Panel {
         }
     }
 
+    // ---- the command (sudo / ssh): all of it, in a code block ----
+    Rectangle {
+        visible: p.asks && AuthState.message !== ""
+        width: parent.width
+        height: cmdT.implicitHeight + 16
+        radius: 10
+        color: Look.raise
+        G { x: 10; y: 8; height: 16; glyph: 0xF018D; color: Look.faint; font.pixelSize: 12 }
+        T {
+            id: cmdT
+            x: 30; y: 8
+            width: parent.width - 40
+            text: AuthState.message
+            textFormat: Text.PlainText
+            font.family: Look.icons
+            font.pixelSize: Look.size - 1
+            color: Qt.alpha(Look.text, 0.9)
+            wrapMode: Text.WrapAnywhere
+            maximumLineCount: 6
+            elide: Text.ElideRight
+            lineHeight: 1.15
+        }
+    }
+    // ---- ssh's question, as it asked it (host, key type, fingerprint) ----
+    T {
+        visible: p.question && AuthState.prompt !== ""
+        width: parent.width
+        text: AuthState.prompt.trim()
+        textFormat: Text.PlainText
+        wrapMode: Text.Wrap
+        color: Look.dim
+        font.pixelSize: Look.small
+        lineHeight: 1.15
+    }
+
     // ---- the body: one height, the stages cross-fade inside it ----
     Item {
         width: parent.width
-        height: 110
+        // polkit and sudo keep room for the fingerprint ring; ssh never asks for a finger
+        height: p.asks && !AuthState.hooked ? passView.implicitHeight : 110
 
         // finger (and wait, and ok): the ring
         Item {
@@ -219,9 +268,11 @@ Panel {
                 x: p.shake * 7
                 width: parent.width
                 implicitHeight: 34
-                secret: !(p.flow?.responseVisible ?? false)
-                glyph: 0xF033E
-                hint: (p.flow?.inputPrompt ?? "").replace(/:\s*$/, "") || "Password"
+                visible: AuthState.mode !== "confirm" || !p.asks
+                secret: p.asks ? AuthState.mode === "secret" : !(p.flow?.responseVisible ?? false)
+                glyph: p.asks && AuthState.mode === "text" ? 0xF0625 : 0xF033E
+                hint: p.asks ? (AuthState.mode === "text" ? "Type yes, no, or the fingerprint" : AuthState.app === "sudo" ? "Password" : "Passphrase")
+                    : (p.flow?.inputPrompt ?? "").replace(/:\s*$/, "") || "Password"
                 onAccepted: { AuthState.submit(text); text = "" }
             }
             T {
@@ -260,7 +311,8 @@ Panel {
             Btn { text: "Cancel"; onClicked: AuthState.cancel() }
             Btn {
                 visible: p.stage === "pass"
-                text: "Unlock"
+                text: !p.asks ? "Unlock" : AuthState.mode === "confirm" ? "OK" : AuthState.mode === "text" ? "Answer"
+                    : AuthState.app === "sudo" ? "Run" : "Unlock"
                 strong: true
                 onClicked: { AuthState.submit(field.text); field.text = "" }
             }
