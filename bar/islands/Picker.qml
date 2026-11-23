@@ -5,12 +5,12 @@ import qs.islands
 
 // A symbol picker card, dropped out of the clock: emoji (panels/Emoji.qml, SUPER+.) and Nerd
 // Font glyphs (panels/Glyphs.qml, SUPER+,), with `src` (PickerData) holding the list and the
-// paste. A search field, a strip of the list's groups and one grid of everything, recent first;
+// copy. A search field, a strip of the list's groups and one grid of everything, recent first;
 // the strip follows the selection and a group's icon jumps to it. The symbol under the
 // selection is shown big at the bottom with its name and keywords.
 // Typing searches (every word has to start a word of the name or keywords), arrows move,
-// Tab/Shift+Tab jump group, Enter pastes into the window you came from, Shift+Enter only
-// copies, Esc clears the search, then closes. A click pastes too.
+// Tab/Shift+Tab jump group, Enter (or a click) copies it and closes, Esc clears the search,
+// then closes.
 Panel {
     id: p
     required property var src
@@ -47,11 +47,11 @@ Panel {
         const to = order[Math.max(0, Math.min(order.length - 1, at + dir))]
         if (to) sel = to.s
     }
-    function pick(copyOnly) {
+    function pick() {
         if (!cur) return
         const ch = cur.ch
         p.ctl.hide()
-        src.pick(ch, copyOnly)
+        src.pick(ch)
     }
 
     // ---- search ----
@@ -79,7 +79,7 @@ Panel {
                 else if (e.key === Qt.Key_PageUp) p.move(-p.cols * 5)
                 else if (e.key === Qt.Key_Tab) p.jump(1)
                 else if (e.key === Qt.Key_Backtab) p.jump(-1)
-                else if (e.key === Qt.Key_Return || e.key === Qt.Key_Enter) p.pick(!!(e.modifiers & Qt.ShiftModifier))
+                else if (e.key === Qt.Key_Return || e.key === Qt.Key_Enter) p.pick()
                 else if (e.key === Qt.Key_Escape) text ? text = "" : p.ctl.hide()
                 else return
                 e.accepted = true
@@ -180,7 +180,7 @@ Panel {
                 color: p.src.tinted ? (cell.index === p.sel ? Look.text : Qt.alpha(Look.text, 0.8)) : Look.text
             }
             HoverHandler { id: hov; onHoveredChanged: if (hovered) p.sel = cell.index }
-            TapHandler { onTapped: { p.sel = cell.index; p.pick(false) } }
+            TapHandler { onTapped: { p.sel = cell.index; p.pick() } }
         }
 
         T {
@@ -233,6 +233,6 @@ Panel {
         horizontalAlignment: Text.AlignRight
         color: Look.faint
         font.pixelSize: Look.small
-        text: "tab group    ↵ paste    ⇧↵ copy    esc close"
+        text: "tab group    ↵ copy    esc close"
     }
 }

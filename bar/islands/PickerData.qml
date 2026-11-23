@@ -1,9 +1,8 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
-import Quickshell.Hyprland
 
-// What a symbol picker (Picker.qml) shows and does: its list, recents, search and paste.
+// What a symbol picker (Picker.qml) shows and does: its list, recents, search and copy.
 // EmojiState and GlyphState each hold one. The list is a TSV from scripts/:
 //   group <TAB> symbol <TAB> name <TAB> keywords [<TAB> footer text]
 Scope {
@@ -60,22 +59,10 @@ Scope {
             .map(x => x.e)
     }
 
-    // Copy it, and unless `copyOnly`, paste it into the focused window once the card has let go
-    // of the keyboard (Hyprland's send_shortcut, so no wtype). Terminals paste with Ctrl+Shift+V.
-    readonly property var terminals: ["kitty", "Alacritty", "foot", "org.wezfurlong.wezterm", "com.mitchellh.ghostty", "org.kde.konsole", "XTerm"]
-    property string pasteMods: "CTRL"
-    function pick(ch, copyOnly) {
+    // Copy it to the clipboard (no pasting into the window: that's yours to do).
+    function pick(ch) {
         recent = [ch].concat(recent.filter(c => c !== ch)).slice(0, cols * 3)
         recentFile.setText(JSON.stringify(recent))
         Quickshell.execDetached(["wl-copy", "--", ch])
-        if (copyOnly) return
-        pasteMods = terminals.includes(Hyprland.activeToplevel?.lastIpcObject?.class ?? "") ? "CTRL SHIFT" : "CTRL"
-        pasteT.restart()
-    }
-    Timer {
-        id: pasteT
-        interval: 150
-        onTriggered: Quickshell.execDetached(["hyprctl", "dispatch",
-            `hl.dsp.send_shortcut({ mods = "${root.pasteMods}", key = "V" })`])
     }
 }
