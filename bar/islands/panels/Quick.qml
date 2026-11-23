@@ -42,26 +42,9 @@ Panel {
     }
 
     // ---- night light: HyDE's hyprsunset.sh and its state file (temp|gamma|on|identity) ----
-    // "on" means toggled on AND warmer than identity: HyDE ships it on at 6000K, which tints nothing
-    readonly property var nlState: (nlFile.text() || "6000|100|0|6000").trim().split("|").map(Number)
-    readonly property int nlTemp: nlState[0]
-    readonly property int nlIdentity: nlState[3] || 6000
-    readonly property bool nlOn: nlState[2] === 1 && nlTemp < nlIdentity
-    readonly property int nlMin: 2500
+    // night light (NightLight.qml); nlLive is the slider's value mid-drag
+    readonly property bool nlOn: NightLight.on
     property int nlLive: 0
-    FileView {
-        id: nlFile
-        path: (Quickshell.env("XDG_STATE_HOME") || Quickshell.env("HOME") + "/.local/state") + "/hyde/hyprsunset"
-        watchChanges: true
-        onFileChanged: reload()
-        onLoaded: p.nlLive = 0
-    }
-    function nlToggle() {
-        const sh = "hyde-shell hyprsunset.sh -q"
-        if (nlOn) return Util.run(`${sh} -t`)
-        const t = nlTemp < nlIdentity ? nlTemp : 4500
-        Util.run(nlState[2] === 1 ? `${sh} -s ${t}` : `${sh} -s ${t}; ${sh} -t`)
-    }
     // while dragging, talk to hyprsunset directly (the script is a slow bash start-up); save on release
     Timer { id: nlApply; interval: 50; onTriggered: Util.run(`hyprctl --quiet hyprsunset temperature ${p.nlLive}`) }
 
@@ -126,7 +109,7 @@ Panel {
             anchors { right: parent.right; verticalCenter: parent.verticalCenter }
             spacing: 4
             Round { glyph: 0xF0493; onTap: { p.ctl.hide(); Config.openSettings() } }        // settings
-            Round { glyph: 0xF033E; onTap: p.launch("hyde-shell lockscreen.sh") }            // lock
+            Round { glyph: 0xF033E; onTap: p.launch("loginctl lock-session") }            // lock
             Round { glyph: 0xF0425; onTap: { p.ctl.hide(); Config.togglePower() } }          // power menu
         }
     }
@@ -158,9 +141,9 @@ Panel {
             Layout.fillWidth: true
             glyph: 0xF0594
             label: "Night light"
-            sub: p.nlOn ? `${p.nlLive || p.nlTemp}K` : "Off"
+            sub: p.nlOn ? `${p.nlLive || NightLight.temp}K` : "Off"
             on: p.nlOn
-            onClicked: p.nlToggle()
+            onClicked: NightLight.toggle()
         }
         QTile {
             Layout.fillWidth: true
@@ -220,17 +203,17 @@ Panel {
             id: nl
             width: parent.width - 72
             fill: Look.warm
-            readonly property int temp: p.nlLive || p.nlTemp
-            value: (temp - p.nlMin) / (p.nlIdentity - p.nlMin)
+            readonly property int temp: p.nlLive || NightLight.temp
+            value: (temp - NightLight.min) / (NightLight.identity - NightLight.min)
             onMoved: v => {
-                p.nlLive = Math.round((p.nlMin + v * (p.nlIdentity - p.nlMin - 100)) / 100) * 100
+                p.nlLive = Math.round((NightLight.min + v * (NightLight.identity - NightLight.min - 100)) / 100) * 100
                 if (!nlApply.running) nlApply.start()
                 saveNl.restart()
             }
         }
         T { width: 44; horizontalAlignment: Text.AlignRight; text: nl.temp + "K"; color: Look.dim }
         // saved once the drag settles
-        Timer { id: saveNl; interval: 600; onTriggered: if (p.nlLive) Util.run(`hyde-shell hyprsunset.sh -q -s ${p.nlLive}`) }
+        Timer { id: saveNl; interval: 600; onTriggered: if (p.nlLive) { NightLight.set(p.nlLive); p.nlLive = 0 } }
     }
 
     component Round: Rectangle {

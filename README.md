@@ -119,7 +119,8 @@ Arch package names. Tested on Hyprland 0.57 (Lua config), Quickshell 0.3.2, Qt 6
 | clipboard | `wl-clipboard` |
 | emoji and glyph pickers | `wl-clipboard`; data in `scripts/*.tsv`, rebuilt by `scripts/emoji-data.py` / `glyph-data.py` |
 | fingerprint in the polkit prompt | `fprintd` (optional) |
-| lock / logout / night light | HyDE's `hyde-shell`, `hyprsunset` |
+| lock | a locker that `loginctl lock-session` reaches (hypridle's `lock_cmd`) |
+| night light | `hyprsunset` |
 | phone tile | `kdeconnect` |
 | building the plugin | `hyprland` headers, `pkgconf`, a C++23 compiler |
 | rebuilding shaders | `qt6-shadertools` (`qsb`) |

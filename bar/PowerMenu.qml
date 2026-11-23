@@ -25,9 +25,9 @@ Scope {
     property int sel: 0
     property real hold: 0        // 0..1 while a destructive action is held
     readonly property var actions: [
-        { label: "Lock",      key: "l", icon: 0xF0341, cmd: "hyde-shell lockscreen.sh" },
+        { label: "Lock",      key: "l", icon: 0xF0341, cmd: "loginctl lock-session" },
         { label: "Suspend",   key: "s", icon: 0xF04B2, cmd: "systemctl suspend" },   // hypridle's before_sleep_cmd locks
-        { label: "Log out",   key: "e", icon: 0xF0343, cmd: "hyde-shell logout", hold: true },
+        { label: "Log out",   key: "e", icon: 0xF0343, cmd: "uwsm check is-active 2>/dev/null && uwsm stop || hyprctl dispatch 'hl.dsp.exit()'", hold: true },
         { label: "Reboot",    key: "r", icon: 0xF0709, cmd: "systemctl reboot", hold: true },
         { label: "Shut down", key: "p", icon: 0xF0425, cmd: "systemctl poweroff", hold: true },
     ]
