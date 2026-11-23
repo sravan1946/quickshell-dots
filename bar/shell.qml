@@ -25,21 +25,6 @@ ShellRoot {
     Notifications {}
     Osd {}
 
-    // one critical notification per discharge once the battery hits Settings.batteryLow (the pill turns red too)
-    Connections {
-        target: UPower.displayDevice
-        property bool warned: false
-        function onPercentageChanged() {
-            const d = UPower.displayDevice
-            const cap = d.percentage <= 1 ? d.percentage * 100 : d.percentage
-            if (d.state !== UPowerDeviceState.Discharging) warned = false
-            else if (cap <= Settings.batteryLow && !warned) {
-                warned = true
-                Quickshell.execDetached(["notify-send", "-u", "critical", "-a", "Battery", "-i", "battery-caution", "Battery low", `${Math.round(cap)}% left, plug in`])
-            }
-        }
-    }
-
     // Quickshell can miss a device that connects while it first syncs with BlueZ (the mouse at
     // boot, a second after the bar) and keep it "disconnected" until restarted. So once, a bit
     // after start, check BlueZ's own list and restart if they disagree; the stamp in /run (gone

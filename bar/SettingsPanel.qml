@@ -192,7 +192,8 @@ Scope {
                         Num { title: "Quiet at start-up"; from: 0; to: 5; step: 0.1; unit: " s"; value: Settings.osdArmDelay / 1000; onEdit: v => Settings.osdArmDelay = Math.round(v * 1000) }
                         Head { text: "Battery" }
                         Num { title: "Amber below"; from: 5; to: 50; step: 1; unit: "%"; value: Settings.batteryWarn; onEdit: v => Settings.batteryWarn = Math.max(v, Settings.batteryLow) }
-                        Num { title: "Red and a notification below"; from: 3; to: 30; step: 1; unit: "%"; value: Settings.batteryLow; onEdit: v => Settings.batteryLow = Math.min(v, Settings.batteryWarn) }
+                        Num { title: "Red and a notification below"; from: 3; to: 30; step: 1; unit: "%"; value: Settings.batteryLow; onEdit: v => Settings.batteryLow = Math.max(Settings.batterySuspend, Math.min(v, Settings.batteryWarn)) }
+                        Num { title: "Suspend below"; sub: "After a 2 minute warning, unless it's plugged in"; from: 0; to: 15; step: 1; unit: "%"; value: Settings.batterySuspend; onEdit: v => Settings.batterySuspend = Math.min(v, Settings.batteryLow) }
                     }
                     // Colours
                     Group {

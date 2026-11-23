@@ -5,7 +5,8 @@ import Quickshell.Io
 import Quickshell.Services.UPower
 import qs
 
-// The battery as the bar shows it: level, glyph and the colour it warns in.
+// The battery as the bar shows it: level, glyph and the colour it warns in, and the battery
+// notifications (in place of HyDE's batterynotify): see "alerts" below.
 Singleton {
     id: root
     readonly property var dev: UPower.displayDevice
@@ -32,7 +33,13 @@ Singleton {
     property int samples: 0
     readonly property bool flowing: bat?.state === UPowerDeviceState.Charging || bat?.state === UPowerDeviceState.Discharging
     onFlowingChanged: { rate = 0; samples = 0 }
-    onDrainingChanged: { rate = 0; samples = 0 }
+    onDrainingChanged: {
+        rate = 0; samples = 0
+        // a new charge or discharge: its alerts can fire again
+        if (draining) { toldLimit = false; toldFull = false }
+        else { warned = 101; suspendT.stop() }
+        check()
+    }
     Timer {
         interval: 10000; repeat: true; triggeredOnStart: true
         running: root.flowing
@@ -44,6 +51,67 @@ Singleton {
             root.rate += (r - root.rate) / root.samples
         }
     }
+    // ---- alerts, to the bar's own notification daemon ----
+    // Charger in / out. Discharging: a notification at Settings.batteryWarn, a critical one at
+    // batteryLow, and at batterySuspend a critical one and a suspend 2 minutes later unless the
+    // charger goes in. Charging: once at the charge limit (80 % when none is set: "you can
+    // unplug"), and once full when there's no limit. Each fires once per charge or discharge.
+    function note(urgency, icon, title, body) {
+        Quickshell.execDetached(["notify-send", "-u", urgency, "-a", "Battery", "-i", icon, title, body])
+    }
+    property int warned: 101            // the lowest threshold announced this discharge
+    property bool toldLimit: false
+    property bool toldFull: false
+    property bool ready: false          // the state the bar starts in isn't news
+    // at start-up: charging milestones already passed aren't announced; a low battery still is
+    Timer {
+        interval: 5000; running: true
+        onTriggered: {
+            root.toldLimit = root.charging && root.cap >= (root.limit < 100 ? root.limit : 80)
+            root.toldFull = root.st === UPowerDeviceState.FullyCharged
+            root.ready = true
+            root.check()
+        }
+    }
+    onChargingChanged: if (ready) note("normal", charging ? "battery-good-charging" : "battery-good",
+        charging ? "Charger plugged in" : "Charger unplugged", `Battery at ${cap}%`)
+    onCapChanged: check()
+    onStChanged: check()
+    function check() {
+        if (!ready || !dev.isPresent) return
+        const s = Settings
+        if (draining) {
+            if (cap <= s.batterySuspend && warned > s.batterySuspend) {
+                warned = cap
+                note("critical", "battery-empty", "Battery critical", `${cap}% left. Suspending in 2 minutes unless you plug in.`)
+                suspendT.restart()
+            } else if (cap <= s.batteryLow && warned > s.batteryLow) {
+                warned = cap
+                note("critical", "battery-caution", "Battery low", `${cap}% left, plug in`)
+            } else if (cap <= s.batteryWarn && warned > s.batteryWarn) {
+                warned = cap
+                note("normal", "battery-low", "Battery getting low", `${cap}% left`)
+            }
+        } else if (charging) {
+            const at = limit < 100 ? limit : 80
+            if (cap >= at && !toldLimit) {
+                toldLimit = true
+                note("normal", "battery-good-charging", limit < 100 ? "Charged to the limit" : "You can unplug",
+                    `Battery at ${cap}%`)
+            }
+            if (limit === 100 && st === UPowerDeviceState.FullyCharged && !toldFull) {
+                toldFull = true
+                note("normal", "battery-full-charged", "Battery full", "You can unplug the charger")
+            }
+        }
+    }
+    Timer {
+        id: suspendT
+        interval: 120000
+        onTriggered: if (root.draining && root.cap <= Settings.batterySuspend)
+            Quickshell.execDetached(["systemctl", "suspend"])
+    }
+
     // seconds to empty, or to the limit while charging, at that rate; 0 when it isn't moving
     readonly property int secs: !bat || rate <= 0 || !flowing ? 0
         : bat.state === UPowerDeviceState.Discharging ? bat.energy / rate * 3600

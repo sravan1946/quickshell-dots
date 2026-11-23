@@ -77,9 +77,11 @@ Singleton {
         notifDrop: true,       // notifications drop out of the bell instead of popping up at the side
         historyMax: 100,       // notifications kept in the history panel
 
-        // battery, while discharging: amber below `warn`, red and one notification below `low`
+        // battery, while discharging: amber and a notification below `warn`, red and a critical
+        // one below `low`; below `suspend` it suspends in 2 minutes unless plugged in (BatState)
         batteryWarn: 20,
         batteryLow: 10,
+        batterySuspend: 5,
     })
 
     // ---- live values (what everything binds to) ----
@@ -124,6 +126,7 @@ Singleton {
     property int    historyMax:    defaults.historyMax
     property int    batteryWarn:   defaults.batteryWarn
     property int    batteryLow:    defaults.batteryLow
+    property int    batterySuspend: defaults.batterySuspend
 
     // ---- persistence ----
     property bool loaded: false
