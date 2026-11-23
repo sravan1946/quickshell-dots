@@ -36,8 +36,7 @@ Singleton {
     onDrainingChanged: {
         rate = 0; samples = 0
         // a new charge or discharge: its alerts can fire again
-        if (draining) { toldLimit = false; toldFull = false }
-        else { warned = 101; suspendT.stop() }
+        if (!draining) { warned = 101; suspendT.stop() }
         check()
     }
     Timer {
@@ -55,24 +54,17 @@ Singleton {
     // Charger in / out. Discharging: a notification at Settings.batteryWarn, a critical one at
     // batteryLow, and at batterySuspend a critical one and a suspend 2 minutes later unless the
     // charger goes in. Charging: once at the charge limit (80 % when none is set: "you can
-    // unplug"), and once full when there's no limit. Each fires once per charge or discharge.
+    // unplug"), and once full when there's no limit: only when it gets there while charging, not
+    // when the charger goes in past it. Each fires once per charge or discharge.
     function note(urgency, icon, title, body) {
         Quickshell.execDetached(["notify-send", "-u", urgency, "-a", "Battery", "-i", icon, title, body])
     }
+    readonly property int chargeAt: limit < 100 ? limit : 80   // "you can unplug" from here
     property int warned: 101            // the lowest threshold announced this discharge
-    property bool toldLimit: false
-    property bool toldFull: false
+    property int seen: -1               // the level at the last check while charging; -1 when not
     property bool ready: false          // the state the bar starts in isn't news
-    // at start-up: charging milestones already passed aren't announced; a low battery still is
-    Timer {
-        interval: 5000; running: true
-        onTriggered: {
-            root.toldLimit = root.charging && root.cap >= (root.limit < 100 ? root.limit : 80)
-            root.toldFull = root.st === UPowerDeviceState.FullyCharged
-            root.ready = true
-            root.check()
-        }
-    }
+    // at start-up a low battery is announced; charging milestones already passed aren't
+    Timer { interval: 5000; running: true; onTriggered: { root.ready = true; root.check() } }
     onChargingChanged: if (ready) note("normal", charging ? "battery-good-charging" : "battery-good",
         charging ? "Charger plugged in" : "Charger unplugged", `Battery at ${cap}%`)
     onCapChanged: check()
@@ -93,17 +85,17 @@ Singleton {
                 note("normal", "battery-low", "Battery getting low", `${cap}% left`)
             }
         } else if (charging) {
-            const at = limit < 100 ? limit : 80
-            if (cap >= at && !toldLimit) {
-                toldLimit = true
-                note("normal", "battery-good-charging", limit < 100 ? "Charged to the limit" : "You can unplug",
-                    `Battery at ${cap}%`)
-            }
-            if (limit === 100 && st === UPowerDeviceState.FullyCharged && !toldFull) {
-                toldFull = true
+            // a milestone counts when the level crosses it during a charge, never on the first
+            // look (start-up, or the charger going in past it: "plugged in · 100%" says it)
+            const before = seen
+            seen = cap
+            if (before < 0) return
+            if (before < chargeAt && cap >= chargeAt)
+                note("normal", "battery-good-charging", limit < 100 ? "Charged to the limit" : "You can unplug", `Battery at ${cap}%`)
+            if (limit === 100 && before < 100 && cap >= 100)
                 note("normal", "battery-full-charged", "Battery full", "You can unplug the charger")
-            }
         }
+        if (!charging) seen = -1
     }
     Timer {
         id: suspendT
