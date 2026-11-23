@@ -42,7 +42,7 @@ Scope {
         WlrLayershell.namespace: "islands"
         // keyboard only while a card is open (the calendar's quick add, a Wi-Fi password), and
         // all of it while an authentication prompt is out, so typing goes straight in
-        WlrLayershell.keyboardFocus: win.authing || (card.open && card.key === "clips") ? WlrKeyboardFocus.Exclusive
+        WlrLayershell.keyboardFocus: win.authing || (card.open && (card.key === "clips" || card.key === "emoji" || card.key === "glyph")) ? WlrKeyboardFocus.Exclusive
             : card.open ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
 
         // a real fullscreen window covers the bar: stop drawing it
@@ -770,6 +770,17 @@ Scope {
                 win.pinned = true
             }
         }
+        // SUPER+. / SUPER+, (`qs -c bar ipc call emoji|glyph toggle`): the symbol pickers
+        // (Picker.qml), out of the same place and pinned the same way
+        function summon(key) {
+            if (Hyprland.focusedMonitor?.name !== scope.modelData.name || win.authing) return
+            if (card.open && card.key === key) { win.hide(); return }
+            card.attach(win.hits.cal, key)
+            leaveT.stop()
+            win.pinned = true
+        }
+        Connections { target: EmojiState.data; function onSummoned() { win.summon("emoji") } }
+        Connections { target: GlyphState.data; function onSummoned() { win.summon("glyph") } }
         Timer {
             id: clipT
             interval: Settings.osdTimeout

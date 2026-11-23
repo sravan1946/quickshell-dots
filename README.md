@@ -117,6 +117,7 @@ Arch package names. Tested on Hyprland 0.57 (Lua config), Quickshell 0.3.2, Qt 6
 | brightness | `brightnessctl` |
 | calendar events | `uv` (runs `scripts/gcal.py` with its own deps) |
 | clipboard | `wl-clipboard` |
+| emoji and glyph pickers | `wl-clipboard`; data in `scripts/*.tsv`, rebuilt by `scripts/emoji-data.py` / `glyph-data.py` |
 | fingerprint in the polkit prompt | `fprintd` (optional) |
 | lock / logout / night light | HyDE's `hyde-shell`, `hyprsunset` |
 | phone tile | `kdeconnect` |

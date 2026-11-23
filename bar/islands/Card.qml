@@ -132,7 +132,7 @@ Item {
     // ---- opening, switching, closing ----
     readonly property var files: ({ sys: "Sys", ws: "Ws", wins: "Wins", media: "Media", caf: "Caf", cal: "Cal", meet: "Meet",
         net: "Net", priv: "Priv", tray: "Tray", bt: "Bt", bat: "Bat", bri: "Bri", vol: "Vol", notif: "Notif", quick: "Quick",
-        toast: "Toast", level: "Level", clip: "Clip", clips: "Clips", auth: "Auth" })
+        toast: "Toast", level: "Level", clip: "Clip", clips: "Clips", emoji: "Emoji", glyph: "Glyphs", auth: "Auth" })
     // the island the item lives in: its ancestor (a point test picked the left island for the
     // clock whenever a long window title ran the two islands edge to edge)
     function islandOf(h) {
