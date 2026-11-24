@@ -65,6 +65,9 @@ Singleton {
             let m
             while ((m = re.exec(css)) !== null) defs[m[1]] = m[2].trim()
         }
+        // matugen rewrites the file in place: a read mid-write sees it empty or cut short. Keep
+        // the colours we have until a complete one arrives (no flash of the fallbacks).
+        if (Object.keys(defs).length < Object.keys(root.defs).length || !Object.keys(defs).length) return
         const resolve = (v, depth) => {
             if (v === undefined || depth > 8) return undefined
             if (v.startsWith("@")) return resolve(defs[v.slice(1)], depth + 1)
