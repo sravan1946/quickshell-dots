@@ -20,7 +20,7 @@ Scope {
     id: root
 
     property bool open: false
-    property var walls: []            // [{ path, name, palette[8] }] for the current theme
+    property var walls: []            // [{ path, thumb, name, palette[8] }] for the current theme
     property string raw: ""           // last list output: an unchanged list isn't reassigned
     property string current: ""       // the wallpaper that's set now
     property int sel: 0
@@ -80,6 +80,7 @@ Scope {
                     root.walls = arr.map(w => ({
                         path: w.path,
                         name: w.path.replace(/^.*\//, "").replace(/\.[^.]+$/, "").replace(/[_-]+/g, " "),
+                        thumb: w.thumb,
                         palette: w.palette
                     }))
                 }
@@ -118,7 +119,7 @@ Scope {
             id: backdrop
             anchors.fill: parent
             opacity: root.fade
-            source: root.cur ? root.cur.path : ""
+            source: root.cur ? (root.cur.thumb || root.cur.path) : ""
             onDismissed: root.open = false
         }
 
@@ -206,9 +207,9 @@ Scope {
                             anchors.fill: parent
                             fillMode: Image.PreserveAspectCrop
                             asynchronous: true
-                            // decoded at card size: no thumbnail cache needed
-                            sourceSize: Qt.size(width * 2, height * 2)
-                            source: "file://" + card.modelData.path
+                            // look's cached thumbnail (the original if it has none yet)
+                            sourceSize: Qt.size(root.cardW * 2, root.cardH * 2)
+                            source: "file://" + (card.modelData.thumb || card.modelData.path)
                         }
                         // turned-away cards fall into shade, deeper the further out they are
                         Rectangle {

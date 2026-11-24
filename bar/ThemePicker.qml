@@ -20,7 +20,7 @@ Scope {
     id: root
 
     property bool open: false
-    property var themes: []           // [{ name, wall, colors[8] }] from `look themes`
+    property var themes: []           // [{ name, wall, thumb, colors[8] }] from `look themes`
     property string raw: ""
     property string current: ""
     property int sel: 0
@@ -74,7 +74,7 @@ Scope {
                     root.raw = body
                     root.themes = body.split("\n").filter(l => l).map(l => {
                         const f = l.split("\t")
-                        return { name: f[0], wall: f[1], colors: (f[2] ?? "").split(",") }
+                        return { name: f[0], wall: f[1], thumb: f[3] ?? "", colors: (f[2] ?? "").split(",") }
                     })
                 }
                 root.sel = Math.max(0, root.themes.findIndex(t => t.name === root.current))
@@ -108,7 +108,7 @@ Scope {
             id: backdrop
             anchors.fill: parent
             opacity: root.fade
-            source: root.cur ? root.cur.wall : ""
+            source: root.cur ? (root.cur.thumb || root.cur.wall) : ""
             onDismissed: root.open = false
         }
 
@@ -191,9 +191,9 @@ Scope {
                             anchors.fill: parent
                             fillMode: Image.PreserveAspectCrop
                             asynchronous: true
-                            // decoded at card size: no thumbnail cache needed
-                            sourceSize: Qt.size(width * 2, height * 2)
-                            source: card.modelData.wall ? "file://" + card.modelData.wall : ""
+                            // look's cached thumbnail (the original if it has none yet)
+                            sourceSize: Qt.size(root.cardW * 2, root.cardH * 2)
+                            source: (card.modelData.thumb || card.modelData.wall) ? "file://" + (card.modelData.thumb || card.modelData.wall) : ""
                         }
                         // the card's foot: the theme's background colour rising into the picture
                         Rectangle {

@@ -43,7 +43,7 @@ Item {
             anchors.fill: parent
             fillMode: Image.PreserveAspectCrop
             asynchronous: true
-            sourceSize: Qt.size(640, 360)   // blurred anyway: small decodes fast, no thumbnail cache
+            sourceSize: Qt.size(640, 360)   // blurred anyway: small decodes fast
             z: bd.front === layer ? 1 : 0
             opacity: 0
             onStatusChanged: if (status === Image.Ready && wanted === bd.want && bd.front !== layer) bd.promote(layer)
