@@ -7,20 +7,20 @@ import Quickshell.Hyprland
 import Quickshell.Widgets
 import qs.islands
 
-// Theme picker, in place of HyDE's rofi one (theme.select.sh).
+// Theme picker (`look themes` / `look theme`, ~/.local/bin/look in the dotfiles).
 // The themes are a hand of cards fanned along an arc: the chosen one rises out of the fan,
 // straightens and glows; the rest tilt away along the curve. Each card is the theme's own
-// wallpaper with its name and its terminal palette (kitty.theme). Behind, the chosen theme's
+// wallpaper with its name and the palette matugen makes from it. Behind, the chosen theme's
 // wallpaper fills the screen, blurred. Opening deals the fan out of a stacked deck, closing
 // gathers it back.
 // ←/→ (h/l, Tab, wheel) browse, Enter or a click on the chosen card switches theme
-// (theme.switch.sh -s), Esc or a click outside closes.
+// (`look theme <name>`), Esc or a click outside closes.
 // `qs -c bar ipc call theme toggle|open|close|next|prev|set` (SUPER+SHIFT+T in hyprland.lua).
 Scope {
     id: root
 
     property bool open: false
-    property var themes: []           // [{ name, wall, thumb, colors[8] }] in HyDE's order
+    property var themes: []           // [{ name, wall, colors[8] }] from `look themes`
     property string raw: ""
     property string current: ""
     property int sel: 0
@@ -46,8 +46,7 @@ Scope {
         open = false
         if (cur.name === current) return
         current = cur.name
-        backdrop.grow(cur.wall)
-        Quickshell.execDetached(["hyde-shell", "theme.switch.sh", "-s", cur.name])
+        Quickshell.execDetached(["env", "LOOK_POS=" + backdrop.growFrom, "look", "theme", cur.name])
     }
 
     onOpenChanged: {
@@ -65,8 +64,7 @@ Scope {
 
     Process {
         id: list
-        command: ["sh", "-c", 'sed -n \'s/^HYDE_THEME="\\(.*\\)"/\\1/p\' "$HOME/.local/state/hyde/staterc"; "$0"',
-                  Quickshell.shellDir + "/scripts/themes.sh"]
+        command: ["sh", "-c", 'cat "${XDG_STATE_HOME:-$HOME/.local/state}/look/theme"; look themes']
         stdout: StdioCollector {
             onStreamFinished: {
                 const nl = text.indexOf("\n")
@@ -76,7 +74,7 @@ Scope {
                     root.raw = body
                     root.themes = body.split("\n").filter(l => l).map(l => {
                         const f = l.split("\t")
-                        return { name: f[0], wall: f[1], thumb: f[2], colors: (f[3] ?? "").split(",") }
+                        return { name: f[0], wall: f[1], colors: (f[2] ?? "").split(",") }
                     })
                 }
                 root.sel = Math.max(0, root.themes.findIndex(t => t.name === root.current))
@@ -110,7 +108,7 @@ Scope {
             id: backdrop
             anchors.fill: parent
             opacity: root.fade
-            source: root.cur ? (root.cur.thumb || root.cur.wall) : ""
+            source: root.cur ? root.cur.wall : ""
             onDismissed: root.open = false
         }
 
@@ -193,7 +191,9 @@ Scope {
                             anchors.fill: parent
                             fillMode: Image.PreserveAspectCrop
                             asynchronous: true
-                            source: card.modelData.thumb ? "file://" + card.modelData.thumb : ""
+                            // decoded at card size: no thumbnail cache needed
+                            sourceSize: Qt.size(width * 2, height * 2)
+                            source: card.modelData.wall ? "file://" + card.modelData.wall : ""
                         }
                         // the card's foot: the theme's background colour rising into the picture
                         Rectangle {

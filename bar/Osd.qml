@@ -7,9 +7,7 @@ import qs
 
 // Microphone OSD on the focused monitor (volume and brightness show as a level in the island
 // bar, islands/IslandBar.qml). It reacts to the value changing, whoever changed it: media
-// keys (hyde-shell), pavucontrol.
-// hyde-shell's notify-send OSD is switched off in ~/.local/state/hyde/config
-// (VOLUME_NOTIFY / BRIGHTNESS_NOTIFY), so only this one shows.
+// keys (wpctl/brightnessctl binds), pavucontrol.
 Scope {
     id: osd
 

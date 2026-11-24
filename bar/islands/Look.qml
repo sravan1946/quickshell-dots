@@ -3,17 +3,17 @@ import QtQuick
 import Quickshell
 import qs
 
-// Everything the island bar looks and moves like: colours (from HyDE's wallbash palette, so
+// Everything the island bar looks and moves like: colours (matugen's, from the wallpaper, so
 // theme switches recolour it), type, geometry and the motion tokens (CRAFT.md rule 5).
 // No module writes a colour, a duration or a curve of its own.
 Singleton {
     // ---- colour ----
-    readonly property color accent: Theme.color("@wallbash_1xa8", "#AAAAF0")
-    readonly property color accentInk: Theme.color("@wallbash_1xa1", "#292952")
+    readonly property color accent: Theme.color("@accent", "#AAAAF0")
+    readonly property color accentInk: Theme.color("@accent_ink", "#292952")
     // (the cover's colours, Player.c1/c2, are only for the music's own light: the visualizer,
     // the glow under the media item and its progress filament)
     readonly property color rim: Qt.alpha("white", 0.06)
-    readonly property color base: Theme.color("@wallbash_pry1", "#2A2A3A")
+    readonly property color base: Theme.color("@base", "#2A2A3A")
     readonly property color surface: Qt.rgba(base.r * 0.38, base.g * 0.38, base.b * 0.43, 0.88)
     readonly property color text: "#ececf6"
     readonly property color dim: Qt.alpha(text, 0.58)

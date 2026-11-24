@@ -1,8 +1,7 @@
 # quickshell-dots
 
-A [Quickshell](https://quickshell.org) desktop shell for Hyprland on top of
-[HyDE](https://github.com/HyDE-Project/HyDE). It replaces Waybar, the notification daemon, the
-OSD, the polkit agent and wlogout. It also has a small Hyprland plugin that carries the bar's beat
+A [Quickshell](https://quickshell.org) desktop shell for Hyprland. It is the bar, the
+notification daemon, the OSD, the polkit agent and the power menu. It also has a small Hyprland plugin that carries the bar's beat
 wave onto the focused window's border.
 
 This is **v2, the island bar**. The original pill bar is on the
@@ -91,7 +90,7 @@ bar/                        the Quickshell config (run with `qs -c bar`)
                             (colours, type, geometry and motion tokens), *State singletons
   islands/panels/           one file per card
   Settings.qml              every setting and its default, saved to ~/.config/quickshell-bar
-  Theme.qml                 colours, read live from HyDE's wallbash output
+  Theme.qml                 colours, read live from ~/.local/state/look/colors.css
   Notifications.qml, PowerMenu.qml, SettingsPanel.qml, Lyrics.qml, Player.qml, Visualizer.qml, ...
   shaders/                  GLSL effects + their compiled .qsb (rebuild with build.sh)
   scripts/                  cava config, kick detector, lyrics, earbud battery, Google Calendar
@@ -125,8 +124,23 @@ Arch package names. Tested on Hyprland 0.57 (Lua config), Quickshell 0.3.2, Qt 6
 | building the plugin | `hyprland` headers, `pkgconf`, a C++23 compiler |
 | rebuilding shaders | `qt6-shadertools` (`qsb`) |
 
-Without HyDE the bar falls back to the colours in `Theme.qml`. With it, theme switches
-recolour everything live.
+Colours come from `~/.local/state/look/colors.css`, re-read whenever it changes: CSS
+`@define-color` lines, of which the bar uses `accent`, `accent_ink` and `base`. Any generator
+works; mine is a [matugen](https://github.com/InioX/matugen) template rendered from the
+wallpaper:
+
+```css
+@define-color accent {{colors.primary.dark.hex}};
+@define-color accent_ink {{colors.on_primary.dark.hex}};
+@define-color base {{colors.surface_container_high.dark.hex}};
+```
+
+Without the file the bar uses the fallbacks in `islands/Look.qml`.
+
+The wallpaper and theme pickers (`WallPicker.qml`, `ThemePicker.qml`) drive a `look` command
+on `PATH`: `look walls` (JSON `[{path, palette[8]}]`), `look themes` (TSV `name, wallpaper,
+palette`), `look wall <file>` and `look theme <name>`, with the current ones in
+`~/.local/state/look/{wall,theme}`. `LOOK_POS` tells it where to grow the new wallpaper from.
 
 ## Install
 
@@ -154,12 +168,12 @@ polkit-gnome, ...).
 
 ### Hyprland config (Lua)
 
-With HyDE, override its launchers in `~/.config/hypr/hyprland.lua`:
+In `~/.config/hypr/hyprland.lua`:
 
 ```lua
-hyde.config.start.bar = "systemctl --user start quickshell-bar.service"
-hyde.config.start.notifications = ""   -- the bar owns org.freedesktop.Notifications
-hyde.config.start.auth_dialogue = ""   -- the bar is the polkit agent
+hl.on("hyprland.start", function()
+	hl.exec_cmd("systemctl --user start quickshell-bar.service")
+end)
 
 hl.plugin.load(os.getenv("HOME") .. "/.config/hypr/plugins/beatglow/beatglow.so")
 
@@ -182,14 +196,6 @@ hl.window_rule({
 	center = true,
 	size = "620 540",
 })
-```
-
-Without HyDE, start it from the startup hook:
-
-```lua
-hl.on("hyprland.start", function()
-	hl.exec_cmd("systemctl --user start quickshell-bar.service")
-end)
 ```
 
 The plugin is built against one exact Hyprland version and refuses to load against any

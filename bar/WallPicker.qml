@@ -7,20 +7,20 @@ import Quickshell.Hyprland
 import Quickshell.Widgets
 import qs.islands
 
-// Wallpaper picker, in place of HyDE's rofi one (wallpaper.sh -SG; rofi 2.1 shrank its tall
-// cards to small squares, rofi a1c5bbf04a).
+// Wallpaper picker for the current theme's wallpapers (`look walls` / `look wall`, ~/.local/bin/look
+// in the dotfiles).
 // A coverflow: the chosen wallpaper faces you, lit with the accent; the rest turn away and
 // stack into the distance on both sides. Behind it, the chosen wallpaper fills the screen,
-// blurred, and under it sits the palette wallbash pulled from it: the colours the desktop
+// blurred, and under it sits the palette matugen makes from it: the colours the desktop
 // takes on if you set it. Opening fans the cards out from the middle, closing folds them back.
-// ←/→ (h/l, Tab, wheel) browse, Enter or a click on the chosen card sets it through HyDE
-// (wallpaper.sh -s … -G, so wallbash recolours everything), Esc or a click outside closes.
+// ←/→ (h/l, Tab, wheel) browse, Enter or a click on the chosen card sets it (`look wall`, and
+// matugen recolours everything), Esc or a click outside closes.
 // `qs -c bar ipc call wallpaper toggle` (SUPER+SHIFT+W in hyprland.lua).
 Scope {
     id: root
 
     property bool open: false
-    property var walls: []            // [{ path, name, thumb, dcol }] for the current theme
+    property var walls: []            // [{ path, name, palette[8] }] for the current theme
     property string raw: ""           // last list output: an unchanged list isn't reassigned
     property string current: ""       // the wallpaper that's set now
     property int sel: 0
@@ -46,8 +46,7 @@ Scope {
         if (!cur) return
         current = cur.path
         open = false
-        backdrop.grow(cur.path)
-        Quickshell.execDetached(["hyde-shell", "wallpaper.sh", "-s", cur.path, "-G"])
+        Quickshell.execDetached(["env", "LOOK_POS=" + backdrop.growFrom, "look", "wall", cur.path])
     }
 
     onOpenChanged: {
@@ -57,7 +56,7 @@ Scope {
         keys.forceActiveFocus()
     }
 
-    // the list loads at startup and again whenever wallbash recolours (a new wallpaper or
+    // the list loads at startup and again whenever matugen recolours (a new wallpaper or
     // theme), so the cards are decoded before the picker opens; opening re-checks it too
     Component.onCompleted: list.running = true
     Connections {
@@ -68,7 +67,7 @@ Scope {
 
     Process {
         id: list
-        command: ["sh", "-c", 'readlink -f "$HOME/.cache/hyde/wall.set"; hyde-shell wallpaper.sh -j']
+        command: ["sh", "-c", 'readlink -f "${XDG_STATE_HOME:-$HOME/.local/state}/look/wall"; look walls']
         stdout: StdioCollector {
             onStreamFinished: {
                 const nl = text.indexOf("\n")
@@ -80,9 +79,8 @@ Scope {
                     try { arr = JSON.parse(body) } catch (e) {}
                     root.walls = arr.map(w => ({
                         path: w.path,
-                        name: w.basename.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " "),
-                        thumb: w.thmb,
-                        dcol: w.dcol
+                        name: w.path.replace(/^.*\//, "").replace(/\.[^.]+$/, "").replace(/[_-]+/g, " "),
+                        palette: w.palette
                     }))
                 }
                 root.sel = Math.max(0, root.walls.findIndex(w => w.path === root.current))
@@ -91,16 +89,8 @@ Scope {
         }
     }
 
-    // the chosen wallpaper's wallbash palette: four primaries, each with its accent
-    FileView { id: dcolFile; path: root.cur?.dcol ?? "" }
-    readonly property var palette: {
-        const t = dcolFile.text(), out = []
-        for (const n of [1, 2, 3, 4]) for (const k of [`pry${n}`, `${n}xa7`]) {
-            const m = t.match(new RegExp(`dcol_${k}="([0-9A-Fa-f]{6})"`))
-            out.push(m ? "#" + m[1] : "transparent")
-        }
-        return out
-    }
+    // the chosen wallpaper's palette (surface, primary, secondary, tertiary, containers, on_surface)
+    readonly property var palette: root.cur?.palette ?? []
 
     IpcHandler {
         target: "wallpaper"
@@ -123,12 +113,12 @@ Scope {
         WlrLayershell.namespace: "wallpicker"
         WlrLayershell.keyboardFocus: root.open ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
 
-        // the chosen wallpaper, full screen and blurred (its thumbnail: decoded once, instant)
+        // the chosen wallpaper, full screen and blurred (decoded small, see PickerBackdrop)
         PickerBackdrop {
             id: backdrop
             anchors.fill: parent
             opacity: root.fade
-            source: root.cur ? (root.cur.thumb || root.cur.path) : ""
+            source: root.cur ? root.cur.path : ""
             onDismissed: root.open = false
         }
 
@@ -213,17 +203,12 @@ Scope {
 
                         Image {
                             id: img
-                            property bool fellBack: false
                             anchors.fill: parent
                             fillMode: Image.PreserveAspectCrop
                             asynchronous: true
-                            source: card.modelData.thumb ? "file://" + card.modelData.thumb : ""
-                            // no thumbnail yet (a wallpaper HyDE hasn't cached): use the file itself
-                            onStatusChanged: if (status === Image.Error && !fellBack) {
-                                fellBack = true
-                                sourceSize = Qt.size(700, 700)
-                                source = "file://" + card.modelData.path
-                            }
+                            // decoded at card size: no thumbnail cache needed
+                            sourceSize: Qt.size(width * 2, height * 2)
+                            source: "file://" + card.modelData.path
                         }
                         // turned-away cards fall into shade, deeper the further out they are
                         Rectangle {

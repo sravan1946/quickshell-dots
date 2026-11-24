@@ -18,16 +18,9 @@ Item {
 
     function promote(l) { front = l; l.fadeIn() }
 
-    // Put `path` on screen now, growing out of the chosen card (centre, a bit above middle).
-    // HyDE's own apply recolours everything first (wallbash, ~1.1s) and only then calls awww,
-    // so the pickers start the same awww transition themselves and let HyDE's later call
-    // land on the same image, invisibly. Videos are left to HyDE (it converts them first).
-    function grow(path) {
-        if (!path || /\.(mp4|webm|mkv|mov)$/i.test(path)) return
-        Quickshell.execDetached(["awww", "img", path, "--transition-type", "grow",
-            "--transition-pos", "0.5,0.45", "--invert-y", "--transition-bezier", ".43,1.19,1,.4",
-            "--transition-duration", "0.5", "--transition-fps", "60"])
-    }
+    // Where `look` grows the new wallpaper out of (awww --transition-pos): the chosen card,
+    // centre and a bit above middle. Both pickers pass it to `look` as LOOK_POS.
+    readonly property string growFrom: "0.5,0.45"
     onWantChanged: {
         if (!want || front?.wanted === want) return       // already showing it
         const l = front === la ? lb : la
@@ -50,6 +43,7 @@ Item {
             anchors.fill: parent
             fillMode: Image.PreserveAspectCrop
             asynchronous: true
+            sourceSize: Qt.size(640, 360)   // blurred anyway: small decodes fast, no thumbnail cache
             z: bd.front === layer ? 1 : 0
             opacity: 0
             onStatusChanged: if (status === Image.Ready && wanted === bd.want && bd.front !== layer) bd.promote(layer)

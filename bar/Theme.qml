@@ -3,15 +3,15 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 
-// Colours: every one is a Settings value that is either "@name", one of HyDE's colour
-// variables (read from the same files waybar's style.css imports, so theme switches still
-// recolour the bar), or a fixed "#hex". The literals below are the fallbacks for a variable
-// HyDE doesn't define (yet: the files load async).
+// Colours: every one is a Settings value that is either "@name", a colour matugen makes from the
+// wallpaper (~/.local/state/look/colors.css, from the dotfiles' matugen/templates/bar.css, so a new
+// wallpaper or theme recolours the bar), or a fixed "#hex". The literals below are the fallbacks for
+// a name it doesn't define (yet: the file loads async).
 Singleton {
     id: root
 
-    // every HyDE @define-color, resolved: name -> color. "gtk-fg" is the GTK theme's text
-    // colour (waybar's tray/power menus take theirs from it).
+    // every @define-color in colors.css, resolved: name -> color. "gtk-fg" is the GTK theme's
+    // text colour.
     property var defs: ({})
     property color gtkText: "#c0caf5"
     function color(spec, fallback) {
@@ -21,10 +21,6 @@ Singleton {
         return k === "gtk-fg" ? gtkText : (defs[k] ?? fallback)
     }
     function has(name) { return name === "gtk-fg" || defs[name] !== undefined }
-    // the variables offered in the settings colour picker, in palette order
-    readonly property var themeVars: ["bar-bg", "main-bg", "main-fg", "wb-act-bg", "wb-act-fg", "wb-hvr-bg", "wb-hvr-fg", "gtk-fg"]
-    readonly property var paletteVars: [1, 2, 3, 4].map(n =>
-        [`wallbash_pry${n}`, `wallbash_txt${n}`].concat([1, 2, 3, 4, 5, 6, 7, 8, 9].map(i => `wallbash_${n}xa${i}`)))
 
     property color barBg: color("@bar-bg", Qt.rgba(0, 0, 0, 0.1))
     property color mainBg: color(Settings.themeMainBg, "#24283b")
@@ -43,24 +39,14 @@ Singleton {
     function g(cp) { return String.fromCodePoint(cp) }
 
     FileView {
-        id: wallbash
-        path: Quickshell.env("HOME") + "/.cache/hyde/wallbash/gtk.css"
-        watchChanges: true
-        onFileChanged: reload()
-        onLoaded: root.apply()
-    }
-    // HyDE's wallbash renders the bar colours into ~/.config/waybar/theme.css from its
-    // own templates (waybar.dcol / <theme>/waybar.theme), with or without waybar
-    // installed, but skips the write if that directory is missing. Keep it around.
-    Process { running: true; command: ["mkdir", "-p", Quickshell.env("HOME") + "/.config/waybar"] }
-    FileView {
-        id: theme
-        path: Quickshell.env("HOME") + "/.config/waybar/theme.css"
+        id: colors
+        path: (Quickshell.env("XDG_STATE_HOME") || Quickshell.env("HOME") + "/.local/state") + "/look/colors.css"
         watchChanges: true
         onFileChanged: reload()
         onLoaded: { root.apply(); gtkFg.running = true }
+        onLoadFailed: retry.start()   // not made yet (before the first `look wall`)
     }
-
+    Timer { id: retry; interval: 3000; onTriggered: colors.reload() }
     Process {
         id: gtkFg
         command: ["sh", "-c", `
@@ -75,7 +61,7 @@ Singleton {
     function apply() {
         const defs = {}
         const re = /@define-color\s+([\w-]+)\s+([^;]+);/g
-        for (const css of [wallbash.text(), theme.text()]) {
+        for (const css of [colors.text()]) {
             let m
             while ((m = re.exec(css)) !== null) defs[m[1]] = m[2].trim()
         }
